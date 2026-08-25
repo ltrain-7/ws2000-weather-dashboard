@@ -1,0 +1,63 @@
+name: Monitor Ambient Weather API docs
+
+on:
+  schedule:
+    - cron: "17 13 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Compare official documentation revision
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: ambient-weather/api-docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$(tr -d '[:space:]' < .github/ambient-api-docs.sha)"
+          default_branch="$(gh api "repos/$UPSTREAM_REPO" --jq .default_branch)"
+          latest="$(gh api "repos/$UPSTREAM_REPO/commits/$default_branch" --jq .sha)"
+          {
+            echo "baseline=$baseline"
+            echo "latest=$latest"
+            echo "changed=$([ "$baseline" = "$latest" ] && echo false || echo true)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue when documentation changes
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE: ${{ steps.compare.outputs.baseline }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Ambient Weather API documentation changed"
+          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing already tracks the upstream change."
+            exit 0
+          fi
+
+          cat > /tmp/ambient-api-change.md <<EOF
+          Ambient Weather's official API documentation repository has changed since the reviewed baseline.
+
+          - Reviewed baseline: https://github.com/ambient-weather/api-docs/commit/$BASELINE
+          - Latest revision: https://github.com/ambient-weather/api-docs/commit/$LATEST
+          - Compare changes: https://github.com/ambient-weather/api-docs/compare/$BASELINE...$LATEST
+
+          Review the API changes against this dashboard's REST and realtime integrations. If compatible, update `.github/ambient-api-docs.sha` to `$LATEST` and close this issue.
+
+          This issue was created automatically by the weekly API documentation monitor.
+          EOF
+          gh issue create --title "$title" --body-file /tmp/ambient-api-change.md

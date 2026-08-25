@@ -47,6 +47,63 @@ docker compose ps
 curl http://127.0.0.1:3000/api/health
 ```
 
+## Synology DSM installation
+
+These steps are written for DSM 7 with **Container Manager** installed from Package Center.
+
+1. In **File Station**, create `/volume1/docker/ws2000-dashboard`.
+2. Download this repository's source archive from GitHub and extract its contents into that folder. `docker-compose.yml`, `.env.example`, `scripts/`, `public/`, and `src/` should be directly inside `ws2000-dashboard`, not inside an extra nested folder.
+3. Copy `.env.example` to `.env`. In File Station, make sure `.env` is not shared publicly. Edit it and set at least:
+
+   ```text
+   AMBIENT_APPLICATION_KEY=your-application-key
+   AMBIENT_API_KEY=your-api-key
+   TZ=America/New_York
+   ```
+
+   Create the Ambient keys at <https://ambientweather.net/account>. Do not put real keys in GitHub or screenshots.
+
+4. Create the persistent folders `data` and `backups` inside `/volume1/docker/ws2000-dashboard`.
+5. In **Container Manager → Project → Create**, choose:
+
+   - Project name: `ws2000-dashboard`
+   - Path: `/volume1/docker/ws2000-dashboard`
+   - Source: use the existing `docker-compose.yml`
+
+6. Build/start the project. The public multi-architecture image works on supported Intel/AMD and ARM Synology models. No GitHub login is required.
+7. Open `http://SYNOLOGY-IP:3000` on the local network. Container Manager should report the container as healthy after roughly 20–60 seconds.
+
+### DSM SSH alternative
+
+If SSH is enabled, run these commands as an administrator with root privileges. DSM may not include `/usr/local/bin` in non-interactive command paths, so the absolute Docker path is intentional:
+
+```sh
+cd /volume1/docker/ws2000-dashboard
+cp .env.example .env
+mkdir -p data backups
+chmod 600 .env
+# Edit .env and add the two Ambient keys before continuing.
+/usr/local/bin/docker compose up -d
+/usr/local/bin/docker compose ps
+wget -qO- http://127.0.0.1:3000/api/health
+```
+
+If SQLite reports a permissions error:
+
+```sh
+chown -R 1000:1000 /volume1/docker/ws2000-dashboard/data
+chmod 750 /volume1/docker/ws2000-dashboard/data
+/usr/local/bin/docker compose restart
+```
+
+Allow TCP port `3000` in **Control Panel → Security → Firewall** only for trusted local-network ranges. Do not expose the dashboard directly to the internet.
+
+To backfill the preceding 90 days after the station connects:
+
+```sh
+/usr/local/bin/docker exec ws2000-dashboard npm run backfill -- 90
+```
+
 ## Hardware profiles
 
 | Profile | Typical device | Memory cap | History | Chart points | REST fallback |
@@ -132,6 +189,10 @@ Run the guarded updater manually:
 ```
 
 The updater pulls the `stable` image, stops the app briefly for a consistent SQLite backup, starts the new version, checks `/api/health`, and rolls back to the prior image if the health check fails. Backups are stored under `backups/`.
+
+### Ambient Weather API documentation monitoring
+
+The weekly `Monitor Ambient Weather API docs` GitHub Actions workflow checks the latest commit in Ambient Weather's official [`ambient-weather/api-docs`](https://github.com/ambient-weather/api-docs) repository against `.github/ambient-api-docs.sha`. If the upstream documentation changes, it opens one GitHub issue with links to the old and new revisions. After reviewing compatibility, update the baseline SHA and close the issue.
 
 ### Weekly automatic updates on Synology
 
