@@ -2,7 +2,16 @@
 set -eu
 
 project_dir="${PROJECT_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
-docker_bin="${DOCKER_BIN:-docker}"
+if [ -n "${DOCKER_BIN:-}" ]; then
+  docker_bin="$DOCKER_BIN"
+elif command -v docker >/dev/null 2>&1; then
+  docker_bin="$(command -v docker)"
+elif [ -x /usr/local/bin/docker ]; then
+  docker_bin=/usr/local/bin/docker
+else
+  echo "Docker was not found. Set DOCKER_BIN to its absolute path." >&2
+  exit 1
+fi
 image="${WS2000_IMAGE:-ghcr.io/ltrain-7/ws2000-weather-dashboard:stable}"
 backup_root="${BACKUP_DIR:-$project_dir/backups}"
 stamp="$(date +%Y%m%d-%H%M%S)"
