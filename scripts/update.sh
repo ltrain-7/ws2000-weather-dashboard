@@ -14,8 +14,33 @@ else
 fi
 image="${WS2000_IMAGE:-ghcr.io/ltrain-7/ws2000-weather-dashboard:stable}"
 backup_root="${BACKUP_DIR:-$project_dir/backups}"
+backup_retention_days="${BACKUP_RETENTION_DAYS:-90}"
+backup_max_files="${BACKUP_MAX_FILES:-12}"
 stamp="$(date +%Y%m%d-%H%M%S)"
 backup_file="$backup_root/weather-data-$stamp.tgz"
+
+case "$backup_retention_days:$backup_max_files" in
+  *[!0-9:]*|:*|*:)
+    echo "BACKUP_RETENTION_DAYS and BACKUP_MAX_FILES must be non-negative integers." >&2
+    exit 1
+    ;;
+esac
+
+prune_backups() {
+  if [ "$backup_retention_days" -gt 0 ]; then
+    find "$backup_root" -maxdepth 1 -type f -name 'weather-data-*.tgz' \
+      -mtime "+$backup_retention_days" -delete
+  fi
+
+  if [ "$backup_max_files" -gt 0 ]; then
+    find "$backup_root" -maxdepth 1 -type f -name 'weather-data-*.tgz' -print \
+      | sort -r \
+      | awk -v keep="$backup_max_files" 'NR > keep' \
+      | while IFS= read -r expired_backup; do
+          rm -f -- "$expired_backup"
+        done
+  fi
+}
 
 cd "$project_dir"
 mkdir -p "$backup_root"
@@ -26,6 +51,7 @@ $docker_bin compose pull ws2000-dashboard
 new_image_id="$($docker_bin image inspect --format '{{.Id}}' "$image")"
 
 if [ -n "$old_image_id" ] && [ "$old_image_id" = "$new_image_id" ]; then
+  prune_backups
   echo "Already current."
   exit 0
 fi
@@ -52,6 +78,7 @@ if $docker_bin compose up -d --force-recreate ws2000-dashboard; then
 fi
 
 if [ "$healthy" = true ]; then
+  prune_backups
   echo "Update succeeded and passed its health check."
   exit 0
 fi

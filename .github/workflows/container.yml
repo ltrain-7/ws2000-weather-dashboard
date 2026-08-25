@@ -50,3 +50,57 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select published tag
+        id: image
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=ghcr.io/ltrain-7/ws2000-weather-dashboard:stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=ghcr.io/ltrain-7/ws2000-weather-dashboard:edge" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify container health
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull --platform "$PLATFORM" "$IMAGE"
+          container="ws2000-smoke-${PLATFORM//\//-}"
+          docker run -d --name "$container" --platform "$PLATFORM" "$IMAGE"
+          trap 'docker logs "$container"; docker rm -f "$container"' EXIT
+          for attempt in {1..30}; do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+            if [[ "$status" == healthy ]]; then
+              exit 0
+            fi
+            if [[ "$status" == unhealthy || "$status" == exited ]]; then
+              exit 1
+            fi
+            sleep 3
+          done
+          exit 1

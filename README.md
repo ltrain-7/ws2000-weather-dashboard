@@ -192,6 +192,8 @@ Run the guarded updater manually:
 
 The updater pulls the `stable` image, stops the app briefly for a consistent SQLite backup, starts the new version, checks `/api/health`, and rolls back to the prior image if the health check fails. Backups are stored under `backups/`.
 
+Updater backups are limited to 12 files and 90 days by default. Override either limit for a manual or scheduled run with `BACKUP_MAX_FILES` or `BACKUP_RETENTION_DAYS`; set a value to `0` to disable that limit.
+
 ### Ambient Weather API documentation monitoring
 
 The weekly `Monitor Ambient Weather API docs` GitHub Actions workflow checks the latest commit in Ambient Weather's official [`ambient-weather/api-docs`](https://github.com/ambient-weather/api-docs) repository against `.github/ambient-api-docs.sha`. If the upstream documentation changes, it opens one GitHub issue with links to the old and new revisions. After reviewing compatibility, update the baseline SHA and close the issue.
@@ -231,6 +233,7 @@ The database survives updates and rebuilds because it lives in the host `data` d
 - This dashboard has no login screen. Use it on a trusted home network.
 - Do not expose port 3000 directly to the public internet. Use an authenticated reverse proxy or VPN if remote access is required.
 - Docker logs are rotated to protect small SD cards from unbounded log growth.
+- CI smoke-tests the published `amd64`, `arm64`, and `arm/v7` images under emulation. This improves Raspberry Pi confidence but does not replace validation on every physical Pi model and OS image.
 
 ## Troubleshooting
 
