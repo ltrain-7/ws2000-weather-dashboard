@@ -1,0 +1,5 @@
+services:
+  ws2000-dashboard:
+    image: ws2000-weather-dashboard:local
+    build:
+      context: .

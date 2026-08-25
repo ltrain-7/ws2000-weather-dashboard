@@ -1,0 +1,758 @@
+const http = require("node:http");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
+const path = require("node:path");
+const { createWeatherStore } = require("./storage");
+
+const ROOT_DIR = path.resolve(__dirname, "..");
+const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+
+loadDotEnv(path.join(ROOT_DIR, ".env"));
+
+const PORT = numberFromEnv("PORT", 3000);
+const HOST = process.env.HOST || "0.0.0.0";
+const APPLICATION_KEY = clean(process.env.AMBIENT_APPLICATION_KEY);
+const API_KEYS = parseApiKeys();
+const DEFAULT_DEVICE_MAC = clean(process.env.AMBIENT_DEVICE_MAC);
+const REST_ORIGIN = process.env.AMBIENT_REST_ORIGIN || "https://rt.ambientweather.net";
+const REALTIME_ORIGIN =
+  process.env.AMBIENT_REALTIME_ORIGIN || "https://rt2.ambientweather.net";
+const POLL_INTERVAL_MS = clamp(
+  numberFromEnv("AMBIENT_POLL_INTERVAL_MS", 60000),
+  30000,
+  60 * 60 * 1000
+);
+const HISTORY_LIMIT = clamp(numberFromEnv("AMBIENT_HISTORY_LIMIT", 96), 1, 288);
+const HISTORY_MAX_POINTS = clamp(numberFromEnv("HISTORY_MAX_POINTS", 480), 120, 2000);
+const LIVE_HISTORY_LIMIT = clamp(numberFromEnv("LIVE_HISTORY_LIMIT", 192), 24, 288);
+const HISTORY_RETENTION_DAYS = clamp(numberFromEnv("HISTORY_RETENTION_DAYS", 365), 0, 3650);
+const SQLITE_DB_PATH =
+  clean(process.env.SQLITE_DB_PATH) || path.join(ROOT_DIR, "data", "weather.db");
+
+const configured = Boolean(APPLICATION_KEY && API_KEYS.length);
+const clients = new Set();
+const devicesByMac = new Map();
+const latestByMac = new Map();
+const apiKeyByMac = new Map();
+const liveHistoryByMac = new Map();
+const storage = createWeatherStore({
+  dbPath: SQLITE_DB_PATH,
+  retentionDays: HISTORY_RETENTION_DAYS
+});
+
+const state = {
+  configured,
+  targetMac: DEFAULT_DEVICE_MAC,
+  rest: {
+    status: configured ? "idle" : "missing-config",
+    lastSync: null,
+    message: configured ? "" : "Ambient API keys are not configured."
+  },
+  realtime: {
+    status: configured ? "idle" : "missing-config",
+    lastEvent: null,
+    message: configured ? "" : "Ambient API keys are not configured.",
+    invalidApiKeyCount: 0
+  },
+  storage: storage.getStatus(),
+  errors: []
+};
+
+const mimeTypes = new Map([
+  [".css", "text/css; charset=utf-8"],
+  [".html", "text/html; charset=utf-8"],
+  [".ico", "image/x-icon"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml; charset=utf-8"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"]
+]);
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (requestUrl.pathname.startsWith("/api/")) {
+      await handleApi(req, res, requestUrl);
+      return;
+    }
+
+    await serveStatic(requestUrl, res);
+  } catch (error) {
+    recordError(error);
+    sendJson(res, 500, { error: "Unexpected server error." });
+  }
+});
+
+hydrateFromStorage();
+
+server.listen(PORT, HOST, () => {
+  console.log(`WS-2000 dashboard listening on http://${HOST}:${PORT}`);
+  console.log(storage.getStatus().message);
+  if (!configured) {
+    console.log("Ambient keys are not configured. Set AMBIENT_APPLICATION_KEY and AMBIENT_API_KEY.");
+  }
+});
+
+if (configured) {
+  refreshDevices("startup").catch(recordError);
+  startRealtime();
+  setInterval(() => {
+    refreshDevices("poll").catch(recordError);
+  }, POLL_INTERVAL_MS);
+}
+
+if (storage.enabled && HISTORY_RETENTION_DAYS > 0) {
+  try {
+    storage.prune();
+  } catch (error) {
+    recordError(error);
+  }
+  setInterval(() => {
+    try {
+      storage.prune();
+    } catch (error) {
+      recordError(error);
+    }
+  }, 60 * 60 * 1000);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+async function handleApi(req, res, requestUrl) {
+  if (req.method === "GET" && requestUrl.pathname === "/api/health") {
+    sendJson(res, 200, {
+      ok: true,
+      configured,
+      deviceCount: devicesByMac.size,
+      realtime: state.realtime.status,
+      rest: state.rest.status,
+      storage: storage.getStatus()
+    });
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/config") {
+    sendJson(res, 200, {
+      configured,
+      hasApplicationKey: Boolean(APPLICATION_KEY),
+      apiKeyCount: API_KEYS.length,
+      defaultDeviceMac: DEFAULT_DEVICE_MAC || null,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      historyLimit: HISTORY_LIMIT,
+      historyMaxPoints: HISTORY_MAX_POINTS,
+      liveHistoryLimit: LIVE_HISTORY_LIMIT,
+      historyRetentionDays: HISTORY_RETENTION_DAYS,
+      storage: storage.getStatus()
+    });
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/storage") {
+    sendJson(res, 200, storage.getStats());
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/events") {
+    openEventStream(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/latest") {
+    sendJson(res, 200, publicState());
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/devices") {
+    if (requestUrl.searchParams.get("refresh") === "1") {
+      await refreshDevices("manual");
+    }
+    sendJson(res, 200, { devices: publicDevices() });
+    return;
+  }
+
+  if (
+    (req.method === "POST" || req.method === "GET") &&
+    requestUrl.pathname === "/api/refresh"
+  ) {
+    await refreshDevices("manual");
+    sendJson(res, 200, publicState());
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/history") {
+    await handleHistory(res, requestUrl);
+    return;
+  }
+
+  sendJson(res, 404, { error: "Not found." });
+}
+
+async function handleHistory(res, requestUrl) {
+  const macAddress =
+    clean(requestUrl.searchParams.get("mac")) || DEFAULT_DEVICE_MAC || firstKnownMac();
+  if (!macAddress) {
+    sendJson(res, 400, { error: "No weather station is available yet." });
+    return;
+  }
+
+  const limit = clamp(Number(requestUrl.searchParams.get("limit") || HISTORY_LIMIT), 1, 10000);
+  const endDate = clean(requestUrl.searchParams.get("endDate"));
+  const startDate = clean(requestUrl.searchParams.get("startDate"));
+  const maxPoints = clamp(Number(requestUrl.searchParams.get("maxPoints") || 0), 0, 2000);
+  const source = clean(requestUrl.searchParams.get("source"));
+  const apiKey = apiKeyByMac.get(macAddress) || API_KEYS[0];
+  const localHistory = readLocalHistory(macAddress, {
+    limit,
+    startDate,
+    endDate,
+    maxPoints
+  });
+
+  if (source !== "ambient" && (localHistory.length >= limit || !configured || source === "local")) {
+    sendJson(res, 200, {
+      macAddress,
+      source: storage.enabled ? "sqlite" : "memory",
+      count: localHistory.length,
+      data: localHistory
+    });
+    return;
+  }
+
+  try {
+    const ambientLimit = clamp(limit, 1, 288);
+    const history = await fetchDeviceHistory(macAddress, apiKey, { limit: ambientLimit, endDate });
+    for (const item of history) {
+      const sanitized = sanitizeData({ ...item, macAddress }, macAddress);
+      persistReading(sanitized, "ambient-history");
+    }
+    let mergedHistory = storage.enabled
+      ? readLocalHistory(macAddress, { limit, startDate, endDate, maxPoints })
+      : [];
+    let responseSource = storage.enabled ? "sqlite+ambient-backfill" : "rest";
+    if (!mergedHistory.length) {
+      mergedHistory = history.map((item) => sanitizeData(item, macAddress));
+      responseSource = "rest";
+    }
+
+    sendJson(res, 200, {
+      macAddress,
+      source: responseSource,
+      count: mergedHistory.length,
+      data: mergedHistory
+    });
+  } catch (error) {
+    recordError(error);
+    sendJson(res, localHistory.length ? 200 : 502, {
+      error: "Unable to fetch Ambient device history.",
+      detail: error.message,
+      source: storage.enabled ? "sqlite-fallback" : "memory-fallback",
+      count: localHistory.length,
+      data: localHistory,
+      fallback: liveHistoryFor(macAddress)
+    });
+  }
+}
+
+async function serveStatic(requestUrl, res) {
+  const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
+  let decodedPath;
+
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch {
+    sendText(res, 400, "Bad request.");
+    return;
+  }
+
+  const filePath = path.normalize(path.join(PUBLIC_DIR, decodedPath));
+  const relativePath = path.relative(PUBLIC_DIR, filePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    sendText(res, 403, "Forbidden.");
+    return;
+  }
+
+  let stats;
+  try {
+    stats = await fsp.stat(filePath);
+  } catch {
+    sendText(res, 404, "Not found.");
+    return;
+  }
+
+  if (!stats.isFile()) {
+    sendText(res, 404, "Not found.");
+    return;
+  }
+
+  const contentType = mimeTypes.get(path.extname(filePath)) || "application/octet-stream";
+  res.writeHead(200, {
+    "content-type": contentType,
+    "cache-control": "no-cache, must-revalidate"
+  });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+async function refreshDevices(reason) {
+  if (!configured) return [];
+
+  state.rest.status = "syncing";
+  state.rest.message = reason === "manual" ? "Refreshing from Ambient REST API." : "";
+  broadcast("state", publicState());
+
+  const allDevices = [];
+
+  for (let index = 0; index < API_KEYS.length; index += 1) {
+    if (index > 0) {
+      await sleep(1100);
+    }
+
+    const apiKey = API_KEYS[index];
+    const devices = await fetchUserDevices(apiKey);
+    for (const device of devices) {
+      apiKeyByMac.set(device.macAddress, apiKey);
+      upsertDevice(device);
+      if (device.lastData) {
+        upsertData(
+          {
+            ...device.lastData,
+            macAddress: device.macAddress,
+            device
+          },
+          "rest",
+          false
+        );
+      }
+    }
+    allDevices.push(...devices);
+  }
+
+  state.rest.status = "ok";
+  state.rest.lastSync = new Date().toISOString();
+  state.rest.message = `Loaded ${allDevices.length} device${allDevices.length === 1 ? "" : "s"}.`;
+  broadcast("state", publicState());
+  return allDevices;
+}
+
+function startRealtime() {
+  let io;
+  try {
+    io = require("socket.io-client");
+  } catch {
+    state.realtime.status = "dependency-missing";
+    state.realtime.message =
+      "Install socket.io-client with npm install, or run the Docker image.";
+    broadcast("state", publicState());
+    return;
+  }
+
+  const socket = io(REALTIME_ORIGIN, {
+    transports: ["websocket"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+    timeout: 20000,
+    query: {
+      api: "1",
+      applicationKey: APPLICATION_KEY
+    }
+  });
+
+  socket.on("connect", () => {
+    state.realtime.status = "connected";
+    state.realtime.message = "Connected to Ambient realtime API.";
+    socket.emit("subscribe", { apiKeys: API_KEYS });
+    broadcast("state", publicState());
+  });
+
+  socket.on("subscribed", (payload = {}) => {
+    state.realtime.status = "subscribed";
+    state.realtime.lastEvent = new Date().toISOString();
+    state.realtime.invalidApiKeyCount = Array.isArray(payload.invalidApiKeys)
+      ? payload.invalidApiKeys.length
+      : 0;
+    state.realtime.message =
+      state.realtime.invalidApiKeyCount > 0
+        ? `${state.realtime.invalidApiKeyCount} Ambient API key failed validation.`
+        : "Subscribed to Ambient station updates.";
+
+    for (const device of payload.devices || []) {
+      if (device.apiKey) {
+        apiKeyByMac.set(device.macAddress, device.apiKey);
+      }
+      upsertDevice(device);
+      if (device.lastData) {
+        upsertData(
+          {
+            ...device.lastData,
+            macAddress: device.macAddress,
+            device
+          },
+          "realtime-subscription",
+          false
+        );
+      }
+    }
+    broadcast("state", publicState());
+  });
+
+  socket.on("data", (data) => {
+    state.realtime.status = "live";
+    state.realtime.lastEvent = new Date().toISOString();
+    state.realtime.message = "Receiving station data.";
+    upsertData(data, "realtime", true);
+  });
+
+  socket.on("disconnect", (reason) => {
+    state.realtime.status = "disconnected";
+    state.realtime.message = `Realtime connection closed: ${reason}`;
+    broadcast("state", publicState());
+  });
+
+  socket.on("connect_error", (error) => {
+    state.realtime.status = "error";
+    state.realtime.message = error.message;
+    recordError(error);
+    broadcast("state", publicState());
+  });
+}
+
+async function fetchUserDevices(apiKey) {
+  const url = new URL("/v1/devices", REST_ORIGIN);
+  url.searchParams.set("apiKey", apiKey);
+  url.searchParams.set("applicationKey", APPLICATION_KEY);
+  return fetchJson(url);
+}
+
+async function fetchDeviceHistory(macAddress, apiKey, options) {
+  const url = new URL(`/v1/devices/${encodeURIComponent(macAddress)}`, REST_ORIGIN);
+  url.searchParams.set("apiKey", apiKey);
+  url.searchParams.set("applicationKey", APPLICATION_KEY);
+  url.searchParams.set("limit", String(options.limit));
+  if (options.endDate) {
+    url.searchParams.set("endDate", options.endDate);
+  }
+  return fetchJson(url);
+}
+
+async function fetchJson(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "ws2000-synology-dashboard/1.0"
+      },
+      signal: controller.signal
+    });
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `Ambient API returned ${response.status}: ${body.slice(0, 180) || response.statusText}`
+      );
+    }
+
+    return body ? JSON.parse(body) : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function upsertDevice(device) {
+  if (!device || !device.macAddress) return;
+
+  const existing = devicesByMac.get(device.macAddress) || {};
+  const merged = {
+    ...existing,
+    ...sanitizeDevice(device),
+    lastSeen: new Date().toISOString()
+  };
+  devicesByMac.set(device.macAddress, merged);
+  persistDevice(merged);
+}
+
+function upsertData(data, source, shouldBroadcast) {
+  if (!data) return;
+
+  const macAddress = data.macAddress || data.device?.macAddress;
+  if (!macAddress) return;
+
+  if (data.device) {
+    upsertDevice(data.device);
+  }
+
+  const sanitized = sanitizeData(data, macAddress);
+  sanitized.source = source;
+  latestByMac.set(macAddress, sanitized);
+  pushLiveHistory(macAddress, sanitized);
+  persistReading(sanitized, source);
+
+  const device = devicesByMac.get(macAddress);
+  if (device) {
+    device.lastData = sanitized;
+    device.lastSeen = new Date().toISOString();
+  }
+
+  if (shouldBroadcast) {
+    broadcast("update", {
+      device: device || null,
+      data: sanitized,
+      state: publicState()
+    });
+  }
+}
+
+function sanitizeDevice(device) {
+  if (!device) return null;
+  const info = device.info || {};
+  return {
+    macAddress: device.macAddress,
+    info: {
+      name: info.name || "Weather Station",
+      location: info.location || "",
+      elevation: valueOrNull(info.elevation)
+    },
+    lastData: sanitizeData(device.lastData, device.macAddress)
+  };
+}
+
+function sanitizeData(data, macAddress) {
+  if (!data) return null;
+  const output = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key === "apiKey") continue;
+    if (key === "device") continue;
+    output[key] = value;
+  }
+  output.macAddress = macAddress || data.macAddress || data.device?.macAddress || null;
+  return output;
+}
+
+function pushLiveHistory(macAddress, data) {
+  const points = liveHistoryByMac.get(macAddress) || [];
+  if (points.length && points[points.length - 1].dateutc === data.dateutc) {
+    points[points.length - 1] = data;
+  } else {
+    points.push(data);
+  }
+
+  while (points.length > LIVE_HISTORY_LIMIT) {
+    points.shift();
+  }
+  liveHistoryByMac.set(macAddress, points);
+}
+
+function liveHistoryFor(macAddress) {
+  const selectedMac = clean(macAddress) || DEFAULT_DEVICE_MAC || firstKnownMac();
+  return {
+    macAddress: selectedMac || null,
+    source: "memory",
+    data: selectedMac ? liveHistoryByMac.get(selectedMac) || [] : []
+  };
+}
+
+function publicState() {
+  return {
+    configured,
+    generatedAt: new Date().toISOString(),
+    targetMac: DEFAULT_DEVICE_MAC || null,
+    rest: state.rest,
+    realtime: state.realtime,
+    storage: storage.getStatus(),
+    devices: publicDevices(),
+    latest: Array.from(latestByMac.values()).filter(Boolean),
+    errors: state.errors.slice(-5)
+  };
+}
+
+function publicDevices() {
+  return Array.from(devicesByMac.values()).filter(Boolean);
+}
+
+function firstKnownMac() {
+  return devicesByMac.keys().next().value || null;
+}
+
+function hydrateFromStorage() {
+  if (!storage.enabled) return;
+
+  try {
+    for (const device of storage.getDevices()) {
+      if (device && device.macAddress) {
+        devicesByMac.set(device.macAddress, device);
+      }
+    }
+
+    for (const reading of storage.getLatestReadings()) {
+      if (!reading || !reading.macAddress) continue;
+      latestByMac.set(reading.macAddress, reading);
+
+      const device = devicesByMac.get(reading.macAddress);
+      if (device) {
+        device.lastData = reading;
+      } else {
+        devicesByMac.set(reading.macAddress, {
+          macAddress: reading.macAddress,
+          info: {
+            name: "Weather Station",
+            location: "",
+            elevation: null
+          },
+          lastData: reading,
+          lastSeen: reading.date || new Date(reading.dateutc).toISOString()
+        });
+      }
+    }
+  } catch (error) {
+    recordError(error);
+  }
+}
+
+function readLocalHistory(macAddress, options) {
+  if (!storage.enabled) {
+    return liveHistoryFor(macAddress).data;
+  }
+
+  try {
+    return storage.getHistory(macAddress, options);
+  } catch (error) {
+    recordError(error);
+    return liveHistoryFor(macAddress).data;
+  }
+}
+
+function persistDevice(device) {
+  try {
+    storage.saveDevice(device);
+  } catch (error) {
+    recordError(error);
+  }
+}
+
+function persistReading(reading, source) {
+  try {
+    storage.saveReading(reading, source);
+  } catch (error) {
+    recordError(error);
+  }
+}
+
+function openEventStream(req, res) {
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no"
+  });
+  res.write(": connected\n\n");
+
+  const client = { res };
+  clients.add(client);
+  sendEvent(client, "state", publicState());
+
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    clients.delete(client);
+  });
+}
+
+function broadcast(event, payload) {
+  for (const client of clients) {
+    sendEvent(client, event, payload);
+  }
+}
+
+function sendEvent(client, event, payload) {
+  client.res.write(`event: ${event}\n`);
+  client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-cache"
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function sendText(res, statusCode, text) {
+  res.writeHead(statusCode, { "content-type": "text/plain; charset=utf-8" });
+  res.end(text);
+}
+
+function recordError(error) {
+  const message = error && error.message ? error.message : String(error);
+  state.errors.push({ at: new Date().toISOString(), message });
+  while (state.errors.length > 20) {
+    state.errors.shift();
+  }
+  console.error(message);
+}
+
+function shutdown() {
+  storage.close();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+function parseApiKeys() {
+  const combined = process.env.AMBIENT_API_KEYS || process.env.AMBIENT_API_KEY || "";
+  return combined
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function loadDotEnv(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const equalsIndex = line.indexOf("=");
+    if (equalsIndex === -1) continue;
+    const key = line.slice(0, equalsIndex).trim();
+    let value = line.slice(equalsIndex + 1).trim();
+    if (
+      (value.startsWith("\"") && value.endsWith("\"")) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function clean(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function valueOrNull(value) {
+  return value === undefined ? null : value;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

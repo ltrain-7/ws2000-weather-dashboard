@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WS-2000 Weather</title>
+    <link rel="stylesheet" href="/styles.css?v=20260824-3">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="sun"></span>
+            <span class="rain"></span>
+          </div>
+          <div>
+            <p class="eyebrow">Ambient Weather</p>
+            <h1>WS-2000 Station</h1>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <label class="select-label" for="stationSelect">Station</label>
+          <select id="stationSelect" class="station-select"></select>
+          <button id="refreshBtn" class="icon-button" type="button" aria-label="Refresh data">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6v6h-6"></path>
+              <path d="M4 18v-6h6"></path>
+              <path d="M19 12a7 7 0 0 0-12-5l-3 3"></path>
+              <path d="M5 12a7 7 0 0 0 12 5l3-3"></path>
+            </svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="status-strip" aria-live="polite">
+        <div id="statusPill" class="status-pill">Connecting</div>
+        <div id="stationMeta" class="station-meta">Waiting for station data</div>
+        <div id="updatedAt" class="updated-at">--</div>
+      </section>
+
+      <section id="setupBanner" class="setup-banner" hidden>
+        <strong>Keys needed.</strong>
+        <span>Set AMBIENT_APPLICATION_KEY and AMBIENT_API_KEY in the server .env file.</span>
+      </section>
+
+      <section class="hero-grid">
+        <div class="primary-reading">
+          <div>
+            <p class="reading-label">Outdoor</p>
+            <p id="temperatureValue" class="temperature-value">--</p>
+            <p id="feelsLikeValue" class="muted">Feels like --</p>
+          </div>
+          <div class="compass" aria-label="Wind direction">
+            <div id="compassNeedle" class="compass-needle"></div>
+            <span>N</span>
+            <strong id="windDirectionValue">--</strong>
+          </div>
+        </div>
+
+        <div class="metric-card accent-teal">
+          <span class="metric-label">Humidity</span>
+          <strong id="humidityValue">--</strong>
+          <small>Outdoor</small>
+        </div>
+        <div class="metric-card accent-coral">
+          <span class="metric-label">Wind</span>
+          <strong id="windValue">--</strong>
+          <small id="gustValue">Gust --</small>
+        </div>
+        <div class="metric-card accent-blue">
+          <span class="metric-label">Pressure</span>
+          <strong id="pressureValue">--</strong>
+          <small>Relative</small>
+        </div>
+        <div class="metric-card accent-gold">
+          <span class="metric-label">Rain</span>
+          <strong id="rainValue">--</strong>
+          <small id="rainDetailValue">Today</small>
+        </div>
+      </section>
+
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-label">Indoor</span>
+          <strong id="indoorValue">--</strong>
+          <small id="indoorHumidityValue">Humidity --</small>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Solar</span>
+          <strong id="solarValue">--</strong>
+          <small id="uvValue">UV --</small>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Dew point</span>
+          <strong id="dewPointValue">--</strong>
+          <small>Calculated</small>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Battery</span>
+          <strong id="batteryValue">--</strong>
+          <small>Outdoor sensor</small>
+        </div>
+      </section>
+
+      <section class="chart-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">History</p>
+            <h2 id="chartTitle">Last readings</h2>
+          </div>
+          <div class="chart-controls">
+            <div class="range-presets" role="group" aria-label="History range">
+              <button class="range-button active" type="button" data-range-days="0">Latest</button>
+              <button class="range-button" type="button" data-range-days="7">7D</button>
+              <button class="range-button" type="button" data-range-days="30">30D</button>
+              <button class="range-button" type="button" data-range-days="90">90D</button>
+              <button class="range-button" type="button" data-range-days="180">180D</button>
+            </div>
+            <div class="date-control">
+              <label for="historyDate">Specific day</label>
+              <input id="historyDate" class="date-input" type="date">
+            </div>
+            <div class="segmented" role="tablist" aria-label="Chart metric">
+              <button class="segment active" type="button" data-metric="tempf">Temp</button>
+              <button class="segment" type="button" data-metric="humidity">Humidity</button>
+              <button class="segment" type="button" data-metric="windspeedmph">Wind</button>
+              <button class="segment" type="button" data-metric="dailyrainin">Rain</button>
+            </div>
+          </div>
+        </div>
+        <canvas id="historyChart" height="280"></canvas>
+      </section>
+
+      <section class="details-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Latest packet</p>
+            <h2>Station fields</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody id="rawTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js?v=20260824-3" defer></script>
+  </body>
+</html>

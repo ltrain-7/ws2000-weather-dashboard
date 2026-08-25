@@ -1,0 +1,16 @@
+{
+  "name": "ws2000-weather-dashboard",
+  "version": "1.1.0",
+  "description": "Portable, low-resource dashboard for Ambient Weather WS-2000 stations.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "backfill": "node scripts/backfill.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "socket.io-client": "2.5.0"
+  }
+}

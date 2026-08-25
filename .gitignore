@@ -1,0 +1,11 @@
+.env
+node_modules/
+data/
+backups/
+update.log
+*.db
+*.db-shm
+*.db-wal
+npm-debug.log*
+Dockerfile.local
+.DS_Store
