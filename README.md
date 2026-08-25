@@ -42,6 +42,8 @@ The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspber
 
 6. Open `http://RASPBERRY-PI-IP:3000`.
 
+For HTTPS on Synology DSM or Raspberry Pi/Linux, see [HTTPS and TLS setup](docs/HTTPS.md).
+
 Check service health with:
 
 ```sh
@@ -181,6 +183,9 @@ docker compose up -d
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
 | `LOG_MAX_SIZE` | Maximum size of each Docker log file |
 | `LOG_MAX_FILES` | Number of rotated Docker log files |
+| `TLS_ENABLED` | Enables native Node HTTPS; defaults to `false` |
+| `TLS_CERT_PATH` | Certificate chain inside the container; defaults to `/app/certs/fullchain.pem` |
+| `TLS_KEY_PATH` | Private key inside the container; defaults to `/app/certs/privkey.pem` |
 
 `SQLITE_DB_PATH` is set safely by `docker-compose.yml` and normally should not be added to `.env`.
 
@@ -234,6 +239,7 @@ The database survives updates and rebuilds because it lives in the host `data` d
 - The browser never receives the Ambient keys.
 - This dashboard has no login screen. Use it on a trusted home network.
 - Do not expose port 3000 directly to the public internet. Use an authenticated reverse proxy or VPN if remote access is required.
+- HTTPS encrypts traffic but does not add login protection. Use a VPN, an authenticated proxy, or a LAN-only firewall rule.
 - Docker logs are rotated to protect small SD cards from unbounded log growth.
 - CI smoke-tests the published `amd64`, `arm64`, and `arm/v7` images under emulation. This improves Raspberry Pi confidence but does not replace validation on every physical Pi model and OS image.
 
