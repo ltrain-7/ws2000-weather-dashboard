@@ -118,7 +118,6 @@ docker compose up -d
 | `LIVE_HISTORY_LIMIT` | In-memory fallback readings; maximum 288 |
 | `HISTORY_RETENTION_DAYS` | SQLite retention; `0` keeps everything |
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
-| `CONTAINER_CPU_LIMIT` | Docker CPU allowance, such as `1.0` |
 | `LOG_MAX_SIZE` | Maximum size of each Docker log file |
 | `LOG_MAX_FILES` | Number of rotated Docker log files |
 

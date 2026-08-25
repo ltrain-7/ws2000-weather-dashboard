@@ -13,8 +13,6 @@ services:
     volumes:
       - ./data:/app/data
     mem_limit: "${CONTAINER_MEMORY_LIMIT:-256m}"
-    cpus: "${CONTAINER_CPU_LIMIT:-1.0}"
-    pids_limit: 128
     stop_grace_period: 10s
     healthcheck:
       test:

@@ -38,18 +38,18 @@ if [ -n "$old_image_id" ]; then
   $docker_bin image tag "$old_image_id" ws2000-weather-dashboard:rollback-local
 fi
 
-$docker_bin compose up -d --force-recreate ws2000-dashboard
-
 healthy=false
-attempt=1
-while [ "$attempt" -le 18 ]; do
-  if [ "$($docker_bin inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ws2000-dashboard 2>/dev/null || true)" = "healthy" ]; then
-    healthy=true
-    break
-  fi
-  sleep 5
-  attempt=$((attempt + 1))
-done
+if $docker_bin compose up -d --force-recreate ws2000-dashboard; then
+  attempt=1
+  while [ "$attempt" -le 18 ]; do
+    if [ "$($docker_bin inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ws2000-dashboard 2>/dev/null || true)" = "healthy" ]; then
+      healthy=true
+      break
+    fi
+    sleep 5
+    attempt=$((attempt + 1))
+  done
+fi
 
 if [ "$healthy" = true ]; then
   echo "Update succeeded and passed its health check."
@@ -62,8 +62,11 @@ if [ -z "$old_image_id" ]; then
   exit 1
 fi
 
-WS2000_IMAGE=ws2000-weather-dashboard:rollback-local \
-  $docker_bin compose up -d --force-recreate ws2000-dashboard
+if ! WS2000_IMAGE=ws2000-weather-dashboard:rollback-local \
+  $docker_bin compose up -d --force-recreate ws2000-dashboard; then
+  echo "Rollback could not start the prior image. Database backup: $backup_file"
+  exit 1
+fi
 
 attempt=1
 while [ "$attempt" -le 18 ]; do
