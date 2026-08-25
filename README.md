@@ -47,9 +47,11 @@ docker compose ps
 curl http://127.0.0.1:3000/api/health
 ```
 
-## Synology DSM installation
+## Synology DSM 7.2–7.4 installation
 
-These steps are written for DSM 7 with **Container Manager** installed from Package Center.
+These steps are validated for DSM 7.2–7.4 with **Container Manager** installed from Package Center.
+
+> **DSM 8 compatibility:** DSM 8 was not available in Synology's official downloads when this guide was last reviewed, so it has not been validated. The dashboard should remain compatible if DSM 8 retains Container Manager, Compose projects, bind-mounted folders, and scheduled tasks. Check the [DSM release notes](https://www.synology.com/en-us/releaseNote/DSM) and this repository's issues before upgrading, then confirm the Docker path and UI labels because Synology may change them.
 
 1. In **File Station**, create `/volume1/docker/ws2000-dashboard`.
 2. Download this repository's source archive from GitHub and extract its contents into that folder. `docker-compose.yml`, `.env.example`, `scripts/`, `public/`, and `src/` should be directly inside `ws2000-dashboard`, not inside an extra nested folder.
