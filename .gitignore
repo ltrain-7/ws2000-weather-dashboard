@@ -2,6 +2,7 @@
 node_modules/
 data/
 backups/
+certs/
 update.log
 *.db
 *.db-shm

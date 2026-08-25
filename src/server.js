@@ -1,4 +1,5 @@
 const http = require("node:http");
+const https = require("node:https");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -11,6 +12,9 @@ loadDotEnv(path.join(ROOT_DIR, ".env"));
 
 const PORT = numberFromEnv("PORT", 3000);
 const HOST = process.env.HOST || "0.0.0.0";
+const TLS_ENABLED = booleanFromEnv("TLS_ENABLED", false);
+const TLS_CERT_PATH = clean(process.env.TLS_CERT_PATH) || "/app/certs/fullchain.pem";
+const TLS_KEY_PATH = clean(process.env.TLS_KEY_PATH) || "/app/certs/privkey.pem";
 const APPLICATION_KEY = clean(process.env.AMBIENT_APPLICATION_KEY);
 const API_KEYS = parseApiKeys();
 const DEFAULT_DEVICE_MAC = clean(process.env.AMBIENT_DEVICE_MAC);
@@ -69,9 +73,10 @@ const mimeTypes = new Map([
   [".webmanifest", "application/manifest+json; charset=utf-8"]
 ]);
 
-const server = http.createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
   try {
-    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const protocol = TLS_ENABLED ? "https" : "http";
+    const requestUrl = new URL(req.url, `${protocol}://${req.headers.host || "localhost"}`);
 
     if (requestUrl.pathname.startsWith("/api/")) {
       await handleApi(req, res, requestUrl);
@@ -83,12 +88,17 @@ const server = http.createServer(async (req, res) => {
     recordError(error);
     sendJson(res, 500, { error: "Unexpected server error." });
   }
-});
+};
+
+const server = TLS_ENABLED
+  ? https.createServer(loadTlsOptions(), requestHandler)
+  : http.createServer(requestHandler);
 
 hydrateFromStorage();
 
 server.listen(PORT, HOST, () => {
-  console.log(`WS-2000 dashboard listening on http://${HOST}:${PORT}`);
+  const protocol = TLS_ENABLED ? "https" : "http";
+  console.log(`WS-2000 dashboard listening on ${protocol}://${HOST}:${PORT}`);
   console.log(storage.getStatus().message);
   if (!configured) {
     console.log("Ambient keys are not configured. Set AMBIENT_APPLICATION_KEY and AMBIENT_API_KEY.");
@@ -145,6 +155,7 @@ async function handleApi(req, res, requestUrl) {
       historyMaxPoints: HISTORY_MAX_POINTS,
       liveHistoryLimit: LIVE_HISTORY_LIMIT,
       historyRetentionDays: HISTORY_RETENTION_DAYS,
+      tlsEnabled: TLS_ENABLED,
       storage: storage.getStatus()
     });
     return;
@@ -737,6 +748,28 @@ function loadDotEnv(filePath) {
 
 function clean(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function booleanFromEnv(name, fallback) {
+  const value = clean(process.env[name]).toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new Error(`${name} must be true or false.`);
+}
+
+function loadTlsOptions() {
+  try {
+    return {
+      cert: fs.readFileSync(TLS_CERT_PATH),
+      key: fs.readFileSync(TLS_KEY_PATH),
+      minVersion: "TLSv1.2"
+    };
+  } catch (error) {
+    throw new Error(
+      `TLS is enabled but its certificate could not be loaded: ${error.message}`
+    );
+  }
 }
 
 function numberFromEnv(name, fallback) {
