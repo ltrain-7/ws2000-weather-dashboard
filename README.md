@@ -4,6 +4,8 @@ A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps 
 
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
+Licensed under the [MIT License](LICENSE). Security reports should follow [SECURITY.md](SECURITY.md), and proposed changes should follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Supported hardware
 
 - Raspberry Pi Zero 2 W running a 64-bit OS: use `pi-zero-2`

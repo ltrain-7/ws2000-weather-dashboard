@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible dashboard problem without including secrets.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include Ambient API keys, station MAC addresses, database files, or private network details.
+  - type: input
+    id: version
+    attributes:
+      label: Dashboard version
+      placeholder: v1.1.2
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Synology DSM
+        - Raspberry Pi
+        - Other Linux/Docker
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove credentials, device identifiers, and private addresses first.
+      render: shell
