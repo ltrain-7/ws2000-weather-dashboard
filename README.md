@@ -1,5 +1,7 @@
 # Portable WS-2000 Weather Dashboard
 
+<!-- Temporary branch-protection validation change. -->
+
 A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
 
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
