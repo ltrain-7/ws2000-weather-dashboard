@@ -365,11 +365,12 @@ function drawChart() {
 
   const metric = metricConfig[state.chartMetric] || metricConfig.tempf;
   const rangeTitle = state.historyDate
-    ? `${metric.label} · ${formatSelectedDate(state.historyDate)}`
+    ? formatSelectedDate(state.historyDate)
     : state.historyRangeDays
-      ? `${metric.label} · Last ${state.historyRangeDays} days`
-    : `${metric.label} history`;
+      ? `Last ${state.historyRangeDays} days`
+      : "Latest readings";
   els.chartTitle.textContent = `${rangeTitle}${trendMethodLabel()}`;
+  canvas.setAttribute("aria-label", `${metric.label} history chart: ${els.chartTitle.textContent}`);
 
   const rawPoints = normalizeHistory(state.history)
     .map((item) => ({

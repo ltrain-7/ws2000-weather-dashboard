@@ -9,7 +9,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260825-1">
+    <link rel="stylesheet" href="/styles.css?v=1.3.1">
   </head>
   <body>
     <main class="app-shell">
@@ -117,12 +117,21 @@
       </section>
 
       <section class="chart-section">
-        <div class="section-heading">
-          <div>
+        <div class="history-header">
+          <div class="history-heading">
             <p class="eyebrow">History</p>
             <h2 id="chartTitle">Last readings</h2>
           </div>
-          <div class="chart-controls">
+          <div class="segmented" role="tablist" aria-label="Chart metric">
+            <button class="segment active" type="button" data-metric="tempf">Temp</button>
+            <button class="segment" type="button" data-metric="humidity">Humidity</button>
+            <button class="segment" type="button" data-metric="windspeedmph">Wind</button>
+            <button class="segment" type="button" data-metric="dailyrainin">Rain</button>
+          </div>
+        </div>
+        <div class="history-filters" aria-label="History filters">
+          <div class="history-filter-group history-range-group">
+            <span class="control-label">Range</span>
             <div class="range-presets" role="group" aria-label="History range">
               <button class="range-button active" type="button" data-range-days="0">Latest</button>
               <button class="range-button" type="button" data-range-days="7">7D</button>
@@ -130,23 +139,17 @@
               <button class="range-button" type="button" data-range-days="90">90D</button>
               <button class="range-button" type="button" data-range-days="180">180D</button>
             </div>
-            <div class="date-control">
-              <label for="historyDate">Specific day</label>
-              <input id="historyDate" class="date-input" type="date">
-            </div>
-            <label class="compare-control">
-              <input id="comparePrevious" type="checkbox">
-              Compare previous period
-            </label>
-            <div class="segmented" role="tablist" aria-label="Chart metric">
-              <button class="segment active" type="button" data-metric="tempf">Temp</button>
-              <button class="segment" type="button" data-metric="humidity">Humidity</button>
-              <button class="segment" type="button" data-metric="windspeedmph">Wind</button>
-              <button class="segment" type="button" data-metric="dailyrainin">Rain</button>
-            </div>
           </div>
+          <div class="history-filter-group history-day-group">
+            <label class="control-label" for="historyDate">Specific day</label>
+            <input id="historyDate" class="date-input" type="date">
+          </div>
+          <label class="compare-control">
+            <input id="comparePrevious" type="checkbox">
+            <span>Compare with previous period</span>
+          </label>
         </div>
-        <canvas id="historyChart" height="280"></canvas>
+        <canvas id="historyChart" height="280" role="img" aria-label="Historical weather chart"></canvas>
       </section>
 
       <section class="insights-grid" aria-label="Historical insights">
@@ -185,6 +188,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260825-1" defer></script>
+    <script src="/app.js?v=1.3.1" defer></script>
   </body>
 </html>
