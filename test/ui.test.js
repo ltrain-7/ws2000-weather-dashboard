@@ -30,7 +30,8 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(script, /shortDesktopConditionsOpen/);
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
-  assert.match(styles, /calc\(100vh - 640px\)/);
+  assert.match(styles, /min-height:\s*180px/);
+  assert.match(styles, /calc\(100vh - 680px\)/);
 });
 
 test("release version and service-worker assets stay synchronized", () => {

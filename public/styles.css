@@ -408,7 +408,10 @@ tr:last-child td { border-bottom: 0; }
   .more-conditions > summary { display: flex; align-items: center; padding: 0 14px; }
   .more-conditions[open] > summary { border-bottom: 1px solid var(--line); }
   .more-conditions .secondary-grid { padding: 10px; }
-  #historyChart { height: clamp(210px, calc(100vh - 640px), 280px); }
+  #historyChart {
+    min-height: 180px;
+    height: clamp(180px, calc(100vh - 680px), 280px);
+  }
 }
 
 @media (max-width: 760px) {
