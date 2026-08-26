@@ -26,8 +26,11 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(dashboard, /id="chartDataTable"/);
   assert.match(script, /addEventListener\("keydown"/);
   assert.match(script, /setAttribute\("aria-selected"/);
+  assert.match(script, /max-height: 900px/);
+  assert.match(script, /shortDesktopConditionsOpen/);
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
+  assert.match(styles, /calc\(100vh - 640px\)/);
 });
 
 test("release version and service-worker assets stay synchronized", () => {

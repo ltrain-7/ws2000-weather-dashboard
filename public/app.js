@@ -608,22 +608,32 @@ function bindTabKeyboard(buttons, activate) {
 
 function configureResponsiveDisclosures() {
   const mobile = window.matchMedia("(max-width: 760px)");
+  const shortDesktop = window.matchMedia("(min-width: 761px) and (max-height: 900px)");
   const apply = () => {
-    if (!mobile.matches) {
+    const compactConditions = mobile.matches || shortDesktop.matches;
+    if (!compactConditions) {
       els.moreConditions.open = true;
-      els.historyOptions.open = true;
-      return;
+    } else if (mobile.matches) {
+      els.moreConditions.open = localStorage.getItem("moreConditionsOpen") === "true";
+    } else {
+      els.moreConditions.open = localStorage.getItem("shortDesktopConditionsOpen") === "true";
     }
-    els.moreConditions.open = localStorage.getItem("moreConditionsOpen") === "true";
-    els.historyOptions.open = localStorage.getItem("historyOptionsOpen") === "true";
+    els.historyOptions.open = mobile.matches
+      ? localStorage.getItem("historyOptionsOpen") === "true"
+      : true;
   };
   els.moreConditions.addEventListener("toggle", () => {
-    if (mobile.matches) localStorage.setItem("moreConditionsOpen", String(els.moreConditions.open));
+    if (mobile.matches) {
+      localStorage.setItem("moreConditionsOpen", String(els.moreConditions.open));
+    } else if (shortDesktop.matches) {
+      localStorage.setItem("shortDesktopConditionsOpen", String(els.moreConditions.open));
+    }
   });
   els.historyOptions.addEventListener("toggle", () => {
     if (mobile.matches) localStorage.setItem("historyOptionsOpen", String(els.historyOptions.open));
   });
   mobile.addEventListener("change", apply);
+  shortDesktop.addEventListener("change", apply);
   apply();
 }
 
