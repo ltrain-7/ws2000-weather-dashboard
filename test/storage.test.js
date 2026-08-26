@@ -1,0 +1,72 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+const { createWeatherStore } = require("../src/storage");
+
+test("analytics aggregate rainfall by local day and create a verified backup", (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-storage-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = createWeatherStore({
+    dbPath: path.join(directory, "weather.db"),
+    retentionDays: 365
+  });
+  context.after(() => store.close());
+
+  assert.equal(store.enabled, true, store.message);
+  const macAddress = "AA:BB:CC:DD:EE:FF";
+  const readings = [
+    ["2026-08-23T12:00:00Z", 0.1, 70, 10],
+    ["2026-08-23T23:00:00Z", 0.35, 74, 18],
+    ["2026-08-24T12:00:00Z", 0.2, 76, 15]
+  ];
+  for (const [date, rain, temperature, gust] of readings) {
+    store.saveReading(
+      {
+        macAddress,
+        dateutc: Date.parse(date),
+        tempf: temperature,
+        humidity: 60,
+        windspeedmph: 4,
+        windgustmph: gust,
+        dailyrainin: rain,
+        hourlyrainin: rain
+      },
+      "test"
+    );
+  }
+
+  const analytics = store.getAnalytics(
+    macAddress,
+    Date.parse("2026-08-23T00:00:00Z"),
+    Date.parse("2026-08-25T00:00:00Z")
+  );
+  assert.equal(analytics.readingCount, 3);
+  assert.equal(analytics.maximumGustMph, 18);
+  assert.ok(Math.abs(analytics.rainfallTotalIn - 0.55) < 0.0001);
+  assert.deepEqual(analytics.wettestDay, { day: "2026-08-23", rainIn: 0.35 });
+  assert.deepEqual(store.integrityCheck(), { ok: true, result: "ok" });
+
+  const backupPath = path.join(directory, "backups", "weather-test.db");
+  const backup = store.createBackup(backupPath);
+  assert.equal(backup.integrity.ok, true);
+  assert.ok(backup.bytes > 0);
+  assert.equal(fs.existsSync(backupPath), true);
+});
+
+test("empty analytics preserve missing values instead of reporting false zeroes", (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-empty-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = createWeatherStore({
+    dbPath: path.join(directory, "weather.db"),
+    retentionDays: 365
+  });
+  context.after(() => store.close());
+
+  const analytics = store.getAnalytics("missing", Date.now() - 86400000, Date.now());
+  assert.equal(analytics.readingCount, 0);
+  assert.equal(analytics.averageTempf, null);
+  assert.equal(analytics.rainfallTotalIn, 0);
+  assert.equal(analytics.wettestDay, null);
+});

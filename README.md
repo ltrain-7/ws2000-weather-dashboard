@@ -2,6 +2,8 @@
 
 A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
 
+It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and a private administration page.
+
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
 Licensed under the [MIT License](LICENSE). Security reports should follow [SECURITY.md](SECURITY.md), and proposed changes should follow [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -42,6 +44,8 @@ The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspber
 
 6. Open `http://RASPBERRY-PI-IP:3000`.
 
+Open `/admin.html` to view application, connection, station, storage, backup, and backfill status. The page never returns Ambient API key values.
+
 For HTTPS on Synology DSM or Raspberry Pi/Linux, see [HTTPS and TLS setup](docs/HTTPS.md).
 
 Check service health with:
@@ -69,7 +73,7 @@ These steps are validated for DSM 7.2–7.4 with **Container Manager** installed
 
    Create the Ambient keys at <https://ambientweather.net/account>. Do not put real keys in GitHub or screenshots.
 
-4. Create the persistent folders `data` and `backups` inside `/volume1/docker/ws2000-dashboard`.
+4. Create the persistent folders `data`, `backups`, and `certs` inside `/volume1/docker/ws2000-dashboard`. If created over SSH as root, run `chown -R 1000:1000 data backups` from the project folder so the container can write data and verified backups.
 5. In **Container Manager → Project → Create**, choose:
 
    - Project name: `ws2000-dashboard`
@@ -86,7 +90,8 @@ If SSH is enabled, run these commands as an administrator with root privileges. 
 ```sh
 cd /volume1/docker/ws2000-dashboard
 cp .env.example .env
-mkdir -p data backups
+mkdir -p data backups certs
+chown -R 1000:1000 data backups
 chmod 600 .env
 # Edit .env and add the two Ambient keys before continuing.
 /usr/local/bin/docker compose up -d
@@ -146,6 +151,10 @@ docker compose restart
 
 ### Backup
 
+The application creates a consistent, integrity-checked SQLite snapshot under `backups/` every 24 hours by default. Use **Admin → Create backup** for an immediate snapshot and **Admin → Check database** to verify the active database. Application backups named `weather-*.db` are pruned according to `BACKUP_RETENTION_DAYS` and `BACKUP_MAX_FILES`.
+
+The guarded image updater separately creates a compressed `weather-data-*.tgz` backup before changing containers. Keeping both mechanisms provides a recent database snapshot plus a pre-update rollback point.
+
 For a consistent offline backup:
 
 ```sh
@@ -155,6 +164,20 @@ docker compose start
 ```
 
 ### Restore
+
+To restore an application-created snapshot, stop the container before replacing the database:
+
+```sh
+docker compose stop
+cp data/weather.db data/weather.db.before-restore
+cp backups/weather-YYYYMMDDTHHMMSSZ.db data/weather.db
+sudo chown 1000:1000 data/weather.db
+docker compose start
+```
+
+Retain `weather.db.before-restore` until the dashboard and `/api/health` have been verified. Do not restore only the SQLite `-wal` or `-shm` files.
+
+To restore a compressed updater or manual archive:
 
 ```sh
 docker compose down
@@ -183,6 +206,10 @@ docker compose up -d
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
 | `LOG_MAX_SIZE` | Maximum size of each Docker log file |
 | `LOG_MAX_FILES` | Number of rotated Docker log files |
+| `STATION_STALE_MINUTES` | Minutes without a reading before station health changes to warning |
+| `BACKUP_INTERVAL_HOURS` | Hours between verified SQLite backups; `0` disables scheduling |
+| `BACKUP_RETENTION_DAYS` | Maximum age of application-created backups; `0` disables age pruning |
+| `BACKUP_MAX_FILES` | Maximum application-created backups retained; `0` disables count pruning |
 | `TLS_ENABLED` | Enables native Node HTTPS; defaults to `false` |
 | `TLS_CERT_PATH` | Certificate chain inside the container; defaults to `/app/certs/fullchain.pem` |
 | `TLS_KEY_PATH` | Private key inside the container; defaults to `/app/certs/privkey.pem` |
@@ -242,6 +269,19 @@ The database survives updates and rebuilds because it lives in the host `data` d
 - HTTPS encrypts traffic but does not add login protection. Use a VPN, an authenticated proxy, or a LAN-only firewall rule.
 - Docker logs are rotated to protect small SD cards from unbounded log growth.
 - CI smoke-tests the published `amd64`, `arm64`, and `arm/v7` images under emulation. This improves Raspberry Pi confidence but does not replace validation on every physical Pi model and OS image.
+
+## Mobile installation and offline behavior
+
+The dashboard is a Progressive Web App. When served over trusted HTTPS, use the browser's **Install app** or **Add to Home Screen** command. It caches the interface and the last successful configuration, status, and station reading. Historical queries and maintenance actions still require a connection to the server.
+
+Browsers require HTTPS for service workers except on `localhost`. A dashboard opened through a plain LAN IP such as `http://192.168.1.10:3000` continues to work normally but is not installable and cannot cache readings offline. Configure HTTPS using [HTTPS and TLS setup](docs/HTTPS.md).
+
+## Analytics and station health
+
+- The health banner warns when the latest packet is older than `STATION_STALE_MINUTES`, becomes offline after four times that interval, or reports a low outdoor battery.
+- Enable **Compare previous period** to overlay the preceding day or rolling range as a dashed line and show summary differences.
+- Rainfall totals use the maximum station daily counter for each local calendar day, preventing frequent observations from being double-counted. The dashboard shows today, the last seven days, the current month, the current year, and the wettest day in the analysis period.
+- The administration page can start a 1–365 day Ambient history backfill. Progress remains visible while the server process is running.
 
 ## Troubleshooting
 

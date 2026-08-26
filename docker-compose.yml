@@ -8,10 +8,12 @@ services:
       - .env
     environment:
       SQLITE_DB_PATH: /app/data/weather.db
+      BACKUP_DIR: /app/backups
     ports:
       - "${DASHBOARD_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
+      - ./backups:/app/backups
       - ./certs:/app/certs:ro
     mem_limit: "${CONTAINER_MEMORY_LIMIT:-256m}"
     stop_grace_period: 10s

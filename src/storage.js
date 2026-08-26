@@ -46,6 +46,22 @@ class DisabledWeatherStore {
   getHistory() {
     return [];
   }
+
+  getAnalytics() {
+    return emptyAnalytics();
+  }
+
+  getReadingStats() {
+    return { readingCount: 0, firstReadingAt: null, latestReadingAt: null };
+  }
+
+  integrityCheck() {
+    return { ok: false, result: this.message };
+  }
+
+  createBackup() {
+    throw new Error(this.message);
+  }
 }
 
 class WeatherStore {
@@ -222,6 +238,33 @@ class WeatherStore {
           MIN(dateutc) AS first_dateutc,
           MAX(dateutc) AS latest_dateutc
         FROM weather_readings
+      `),
+      readingStatsByDevice: this.db.prepare(`
+        SELECT COUNT(*) AS count, MIN(dateutc) AS first_dateutc, MAX(dateutc) AS latest_dateutc
+        FROM weather_readings
+        WHERE mac_address = ?
+      `),
+      periodSummary: this.db.prepare(`
+        SELECT
+          COUNT(*) AS reading_count,
+          AVG(tempf) AS average_tempf,
+          MIN(tempf) AS minimum_tempf,
+          MAX(tempf) AS maximum_tempf,
+          AVG(humidity) AS average_humidity,
+          AVG(windspeedmph) AS average_wind_mph,
+          MAX(windgustmph) AS maximum_gust_mph,
+          MAX(hourlyrainin) AS maximum_rain_rate_in
+        FROM weather_readings
+        WHERE mac_address = ? AND dateutc >= ? AND dateutc < ?
+      `),
+      dailyRain: this.db.prepare(`
+        SELECT
+          date(dateutc / 1000, 'unixepoch', 'localtime') AS day,
+          MAX(dailyrainin) AS rain_in
+        FROM weather_readings
+        WHERE mac_address = ? AND dateutc >= ? AND dateutc < ?
+        GROUP BY day
+        ORDER BY day ASC
       `)
     };
   }
@@ -313,6 +356,12 @@ class WeatherStore {
   getStats() {
     const deviceCount = this.statements.deviceCount.get().count;
     const readingStats = this.statements.readingStats.get();
+    let databaseBytes = null;
+    if (this.dbPath !== ":memory:") {
+      try {
+        databaseBytes = fs.statSync(this.dbPath).size;
+      } catch {}
+    }
     return {
       ...this.getStatus(),
       deviceCount,
@@ -322,7 +371,75 @@ class WeatherStore {
         : null,
       latestReadingAt: readingStats.latest_dateutc
         ? new Date(readingStats.latest_dateutc).toISOString()
-        : null
+        : null,
+      databaseBytes
+    };
+  }
+
+  getAnalytics(macAddress, startDate, endDate) {
+    if (!macAddress) return emptyAnalytics();
+    const start = normalizeDateutc({ dateutc: startDate });
+    const end = normalizeDateutc({ dateutc: endDate });
+    const summary = this.statements.periodSummary.get(macAddress, start, end);
+    const dailyRain = this.statements.dailyRain
+      .all(macAddress, start, end)
+      .map((row) => ({ day: row.day, rainIn: numberOrZero(row.rain_in) }));
+    return {
+      startDate: new Date(start).toISOString(),
+      endDate: new Date(end).toISOString(),
+      readingCount: summary.reading_count,
+      averageTempf: numberOrNull(summary.average_tempf),
+      minimumTempf: numberOrNull(summary.minimum_tempf),
+      maximumTempf: numberOrNull(summary.maximum_tempf),
+      averageHumidity: numberOrNull(summary.average_humidity),
+      averageWindMph: numberOrNull(summary.average_wind_mph),
+      maximumGustMph: numberOrNull(summary.maximum_gust_mph),
+      maximumRainRateIn: numberOrNull(summary.maximum_rain_rate_in),
+      rainfallTotalIn: dailyRain.reduce((sum, row) => sum + row.rainIn, 0),
+      wettestDay: dailyRain.reduce(
+        (wettest, row) => (!wettest || row.rainIn > wettest.rainIn ? row : wettest),
+        null
+      ),
+      dailyRain
+    };
+  }
+
+  getReadingStats(macAddress) {
+    const stats = this.statements.readingStatsByDevice.get(macAddress);
+    return {
+      readingCount: stats.count,
+      firstReadingAt: stats.first_dateutc ? new Date(stats.first_dateutc).toISOString() : null,
+      latestReadingAt: stats.latest_dateutc ? new Date(stats.latest_dateutc).toISOString() : null
+    };
+  }
+
+  integrityCheck() {
+    const rows = this.db.prepare("PRAGMA quick_check").all();
+    const result = rows.map((row) => Object.values(row)[0]).join("; ");
+    return { ok: result === "ok", result };
+  }
+
+  createBackup(backupPath) {
+    if (this.dbPath === ":memory:") {
+      throw new Error("In-memory databases cannot be backed up.");
+    }
+    fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+    if (fs.existsSync(backupPath)) {
+      throw new Error("Backup destination already exists.");
+    }
+    const escapedPath = String(backupPath).replaceAll("'", "''");
+    this.db.exec(`VACUUM INTO '${escapedPath}'`);
+    const integrity = verifyDatabaseFile(backupPath);
+    if (!integrity.ok) {
+      fs.unlinkSync(backupPath);
+      throw new Error(`Backup integrity check failed: ${integrity.result}`);
+    }
+    return {
+      path: backupPath,
+      filename: path.basename(backupPath),
+      bytes: fs.statSync(backupPath).size,
+      createdAt: new Date().toISOString(),
+      integrity
     };
   }
 
@@ -350,8 +467,35 @@ function normalizeDateutc(data) {
 }
 
 function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function emptyAnalytics() {
+  return {
+    readingCount: 0,
+    rainfallTotalIn: 0,
+    wettestDay: null,
+    dailyRain: []
+  };
+}
+
+function verifyDatabaseFile(filePath) {
+  const { DatabaseSync } = require("node:sqlite");
+  const database = new DatabaseSync(filePath, { readOnly: true });
+  try {
+    const rows = database.prepare("PRAGMA quick_check").all();
+    const result = rows.map((row) => Object.values(row)[0]).join("; ");
+    return { ok: result === "ok", result };
+  } finally {
+    database.close();
+  }
 }
 
 function parseJson(value) {

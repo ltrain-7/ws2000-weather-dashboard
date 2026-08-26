@@ -44,6 +44,8 @@ prune_backups() {
 
 cd "$project_dir"
 mkdir -p "$backup_root"
+chmod 775 "$backup_root"
+chown 1000:1000 "$backup_root" 2>/dev/null || true
 
 old_image_id="$($docker_bin inspect --format '{{.Image}}' ws2000-dashboard 2>/dev/null || true)"
 echo "Checking $image for an update."

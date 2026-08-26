@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f8b8d">
+    <title>WS-2000 Administration</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=20260825-1">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div><p class="eyebrow">WS-2000</p><h1>Administration</h1></div>
+        <a class="text-link" href="/">Back to dashboard</a>
+      </header>
+      <section id="adminGrid" class="admin-grid" aria-live="polite"></section>
+      <section class="admin-panel wide">
+        <div class="section-heading"><div><p class="eyebrow">Maintenance</p><h2>Safe operations</h2></div></div>
+        <div class="admin-actions">
+          <button id="refreshAdmin" class="icon-button" type="button">Refresh status</button>
+          <button id="integrityBtn" class="icon-button" type="button">Check database</button>
+          <button id="backupBtn" class="icon-button" type="button">Create backup</button>
+          <label><span class="admin-label">Backfill days</span><input id="backfillDays" class="admin-input" type="number" min="1" max="365" value="90"></label>
+          <button id="backfillBtn" class="icon-button" type="button">Start backfill</button>
+        </div>
+        <div id="adminMessage" class="message-box">Ready.</div>
+      </section>
+    </main>
+    <script src="/admin.js" defer></script>
+  </body>
+</html>

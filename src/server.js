@@ -7,6 +7,8 @@ const { createWeatherStore } = require("./storage");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+const PACKAGE = require(path.join(ROOT_DIR, "package.json"));
+const STARTED_AT = new Date().toISOString();
 
 loadDotEnv(path.join(ROOT_DIR, ".env"));
 
@@ -32,6 +34,11 @@ const LIVE_HISTORY_LIMIT = clamp(numberFromEnv("LIVE_HISTORY_LIMIT", 192), 24, 2
 const HISTORY_RETENTION_DAYS = clamp(numberFromEnv("HISTORY_RETENTION_DAYS", 365), 0, 3650);
 const SQLITE_DB_PATH =
   clean(process.env.SQLITE_DB_PATH) || path.join(ROOT_DIR, "data", "weather.db");
+const BACKUP_DIR = clean(process.env.BACKUP_DIR) || path.join(ROOT_DIR, "backups");
+const BACKUP_INTERVAL_HOURS = clamp(numberFromEnv("BACKUP_INTERVAL_HOURS", 24), 0, 24 * 30);
+const BACKUP_RETENTION_DAYS = clamp(numberFromEnv("BACKUP_RETENTION_DAYS", 90), 0, 3650);
+const BACKUP_MAX_FILES = clamp(numberFromEnv("BACKUP_MAX_FILES", 12), 0, 1000);
+const STATION_STALE_MINUTES = clamp(numberFromEnv("STATION_STALE_MINUTES", 15), 2, 1440);
 
 const configured = Boolean(APPLICATION_KEY && API_KEYS.length);
 const clients = new Set();
@@ -59,7 +66,20 @@ const state = {
     invalidApiKeyCount: 0
   },
   storage: storage.getStatus(),
-  errors: []
+  errors: [],
+  backup: {
+    running: false,
+    lastResult: null,
+    lastError: null
+  },
+  backfill: {
+    running: false,
+    requestedDays: null,
+    pages: 0,
+    oldestReadingAt: null,
+    lastError: null,
+    completedAt: null
+  }
 };
 
 const mimeTypes = new Map([
@@ -128,6 +148,14 @@ if (storage.enabled && HISTORY_RETENTION_DAYS > 0) {
   }, 60 * 60 * 1000);
 }
 
+if (storage.enabled && BACKUP_INTERVAL_HOURS > 0) {
+  setTimeout(() => runBackup("scheduled").catch(recordError), 60 * 1000).unref();
+  setInterval(
+    () => runBackup("scheduled").catch(recordError),
+    BACKUP_INTERVAL_HOURS * 60 * 60 * 1000
+  ).unref();
+}
+
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
@@ -156,6 +184,7 @@ async function handleApi(req, res, requestUrl) {
       liveHistoryLimit: LIVE_HISTORY_LIMIT,
       historyRetentionDays: HISTORY_RETENTION_DAYS,
       tlsEnabled: TLS_ENABLED,
+      stationStaleMinutes: STATION_STALE_MINUTES,
       storage: storage.getStatus()
     });
     return;
@@ -163,6 +192,54 @@ async function handleApi(req, res, requestUrl) {
 
   if (req.method === "GET" && requestUrl.pathname === "/api/storage") {
     sendJson(res, 200, storage.getStats());
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/analytics") {
+    sendJson(res, 200, analyticsResponse(requestUrl));
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/admin") {
+    sendJson(res, 200, adminStatus());
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/admin/backup") {
+    if (!isSameOriginAdminRequest(req)) {
+      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
+      return;
+    }
+    sendJson(res, 202, await runBackup("manual"));
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/admin/integrity") {
+    if (!isSameOriginAdminRequest(req)) {
+      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
+      return;
+    }
+    sendJson(res, 200, storage.integrityCheck());
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/admin/backfill") {
+    if (!isSameOriginAdminRequest(req)) {
+      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
+      return;
+    }
+    const days = clamp(Number(requestUrl.searchParams.get("days") || 90), 1, 365);
+    const macAddress = clean(requestUrl.searchParams.get("mac")) || firstKnownMac();
+    if (!configured || !macAddress) {
+      sendJson(res, 400, { error: "A configured weather station is required." });
+      return;
+    }
+    if (state.backfill.running) {
+      sendJson(res, 409, { error: "A backfill is already running.", backfill: state.backfill });
+      return;
+    }
+    runBackfill(macAddress, days).catch(recordError);
+    sendJson(res, 202, { accepted: true, macAddress, days });
     return;
   }
 
@@ -578,8 +655,185 @@ function publicState() {
     storage: storage.getStatus(),
     devices: publicDevices(),
     latest: Array.from(latestByMac.values()).filter(Boolean),
+    stationHealth: stationHealth(),
     errors: state.errors.slice(-5)
   };
+}
+
+function stationHealth() {
+  const now = Date.now();
+  return Array.from(latestByMac.values()).filter(Boolean).map((reading) => {
+    const observedAt = Number(reading.dateutc) || Date.parse(reading.date || "");
+    const ageMinutes = Number.isFinite(observedAt) ? Math.max(0, (now - observedAt) / 60000) : null;
+    const batteryValue = reading.battout;
+    const batteryLow = batteryValue !== undefined && batteryValue !== null && batteryValue !== "" && Number(batteryValue) !== 1;
+    let status = "online";
+    if (ageMinutes === null || ageMinutes > STATION_STALE_MINUTES * 4) status = "offline";
+    else if (ageMinutes > STATION_STALE_MINUTES || batteryLow) status = "warning";
+    return {
+      macAddress: reading.macAddress,
+      status,
+      observedAt: Number.isFinite(observedAt) ? new Date(observedAt).toISOString() : null,
+      ageMinutes: ageMinutes === null ? null : Number(ageMinutes.toFixed(1)),
+      staleAfterMinutes: STATION_STALE_MINUTES,
+      batteryLow,
+      batteryValue: valueOrNull(batteryValue),
+      source: reading.source || null
+    };
+  });
+}
+
+function analyticsResponse(requestUrl) {
+  const macAddress = clean(requestUrl.searchParams.get("mac")) || DEFAULT_DEVICE_MAC || firstKnownMac();
+  if (!macAddress) return { macAddress: null, current: null, previous: null, rainfall: {} };
+  const days = clamp(Number(requestUrl.searchParams.get("days") || 30), 1, 3650);
+  const end = Date.now();
+  const start = end - days * 86400000;
+  const previousStart = start - days * 86400000;
+  const currentDate = new Date(end);
+  const startOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
+  const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getTime();
+  const startOfYear = new Date(currentDate.getFullYear(), 0, 1).getTime();
+  const rainfall = {
+    day: storage.getAnalytics(macAddress, startOfDay, end),
+    week: storage.getAnalytics(macAddress, end - 7 * 86400000, end),
+    month: storage.getAnalytics(macAddress, startOfMonth, end),
+    year: storage.getAnalytics(macAddress, startOfYear, end)
+  };
+  return {
+    macAddress,
+    days,
+    generatedAt: new Date(end).toISOString(),
+    current: storage.getAnalytics(macAddress, start, end),
+    previous: storage.getAnalytics(macAddress, previousStart, start),
+    rainfall
+  };
+}
+
+function adminStatus() {
+  return {
+    application: {
+      name: PACKAGE.name,
+      version: PACKAGE.version,
+      nodeVersion: process.version,
+      startedAt: STARTED_AT,
+      uptimeSeconds: Math.round(process.uptime()),
+      tlsEnabled: TLS_ENABLED
+    },
+    configured,
+    connections: { rest: state.rest, realtime: state.realtime },
+    stationHealth: stationHealth(),
+    storage: { ...storage.getStats(), integrity: storage.integrityCheck() },
+    backups: {
+      enabled: BACKUP_INTERVAL_HOURS > 0,
+      intervalHours: BACKUP_INTERVAL_HOURS,
+      retentionDays: BACKUP_RETENTION_DAYS,
+      maxFiles: BACKUP_MAX_FILES,
+      files: listBackups(),
+      state: state.backup
+    },
+    backfill: state.backfill,
+    recentErrors: state.errors.slice(-10)
+  };
+}
+
+function isSameOriginAdminRequest(req) {
+  const fetchSite = clean(req.headers["sec-fetch-site"]).toLowerCase();
+  if (fetchSite) return fetchSite === "same-origin";
+  const origin = clean(req.headers.origin);
+  if (!origin) return true;
+  try {
+    const forwardedHost = clean(req.headers["x-forwarded-host"]).split(",")[0];
+    return new URL(origin).host === (forwardedHost || req.headers.host);
+  } catch {
+    return false;
+  }
+}
+
+async function runBackup(reason) {
+  if (state.backup.running) return { accepted: false, message: "A backup is already running." };
+  state.backup.running = true;
+  state.backup.lastError = null;
+  try {
+    const stamp = new Date().toISOString().replaceAll(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const result = storage.createBackup(path.join(BACKUP_DIR, `weather-${stamp}.db`));
+    pruneBackupFiles();
+    state.backup.lastResult = { ...result, path: undefined, reason };
+    return { accepted: true, backup: state.backup.lastResult };
+  } catch (error) {
+    state.backup.lastError = error.message;
+    throw error;
+  } finally {
+    state.backup.running = false;
+  }
+}
+
+function listBackups() {
+  try {
+    return fs.readdirSync(BACKUP_DIR)
+      .filter((name) => /^weather-.*\.db$/.test(name))
+      .map((name) => {
+        const stats = fs.statSync(path.join(BACKUP_DIR, name));
+        return { filename: name, bytes: stats.size, createdAt: stats.mtime.toISOString() };
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+function pruneBackupFiles() {
+  const now = Date.now();
+  const files = listBackups();
+  files.forEach((file, index) => {
+    const tooOld = BACKUP_RETENTION_DAYS > 0 && now - Date.parse(file.createdAt) > BACKUP_RETENTION_DAYS * 86400000;
+    const tooMany = BACKUP_MAX_FILES > 0 && index >= BACKUP_MAX_FILES;
+    if (tooOld || tooMany) fs.unlinkSync(path.join(BACKUP_DIR, file.filename));
+  });
+}
+
+async function runBackfill(macAddress, days) {
+  const cutoff = Date.now() - days * 86400000;
+  const stats = storage.getReadingStats(macAddress);
+  let oldest = stats.firstReadingAt ? Date.parse(stats.firstReadingAt) : Date.now();
+  let cursor = oldest - 1;
+  state.backfill = {
+    running: true,
+    requestedDays: days,
+    pages: 0,
+    oldestReadingAt: new Date(oldest).toISOString(),
+    lastError: null,
+    completedAt: null
+  };
+  try {
+    while (oldest > cutoff) {
+      const history = await fetchDeviceHistory(macAddress, apiKeyByMac.get(macAddress) || API_KEYS[0], {
+        limit: 288,
+        endDate: new Date(cursor).toISOString()
+      });
+      const timestamps = [];
+      for (const item of history || []) {
+        const sanitized = sanitizeData({ ...item, macAddress }, macAddress);
+        persistReading(sanitized, "ambient-backfill");
+        const timestamp = Number(sanitized.dateutc) || Date.parse(sanitized.date || "");
+        if (Number.isFinite(timestamp)) timestamps.push(timestamp);
+      }
+      if (!timestamps.length) break;
+      const nextOldest = Math.min(...timestamps);
+      if (nextOldest >= oldest) break;
+      oldest = nextOldest;
+      cursor = oldest - 1;
+      state.backfill.pages += 1;
+      state.backfill.oldestReadingAt = new Date(oldest).toISOString();
+      if (oldest > cutoff) await sleep(2200);
+    }
+    state.backfill.completedAt = new Date().toISOString();
+  } catch (error) {
+    state.backfill.lastError = error.message;
+    throw error;
+  } finally {
+    state.backfill.running = false;
+  }
 }
 
 function publicDevices() {
