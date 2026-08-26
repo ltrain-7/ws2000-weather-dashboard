@@ -5,6 +5,8 @@ const integrityBtn = document.getElementById("integrityBtn");
 const backupBtn = document.getElementById("backupBtn");
 const backfillBtn = document.getElementById("backfillBtn");
 const backfillDays = document.getElementById("backfillDays");
+const adminStationName = document.getElementById("adminStationName");
+const adminRawTable = document.getElementById("adminRawTable");
 let statusTimer = null;
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -26,8 +28,12 @@ function bindActions() {
 async function loadStatus(preserveMessage = false) {
   setBusy(refreshAdmin, true);
   try {
-    const status = await fetchJson("/api/admin");
+    const [status, latest] = await Promise.all([
+      fetchJson("/api/admin"),
+      fetchJson("/api/latest").catch(() => null)
+    ]);
     renderStatus(status);
+    renderRawPacket(latest);
     if (!preserveMessage) adminMessage.textContent = "Status refreshed.";
     clearTimeout(statusTimer);
     if (status.backfill?.running) statusTimer = setTimeout(() => loadStatus(true), 5000);
@@ -36,6 +42,30 @@ async function loadStatus(preserveMessage = false) {
   } finally {
     setBusy(refreshAdmin, false);
   }
+}
+
+function renderRawPacket(payload) {
+  const devices = Array.isArray(payload?.devices) ? payload.devices : [];
+  const latest = Array.isArray(payload?.latest) ? payload.latest : [];
+  const targetMac = payload?.targetMac || latest[0]?.macAddress || devices[0]?.macAddress;
+  const data = latest.find((item) => item?.macAddress === targetMac) || latest[0];
+  const device = devices.find((item) => item?.macAddress === targetMac) || devices[0];
+  adminStationName.textContent = device?.info?.name ? `Latest packet from ${device.info.name}` : "Latest station packet";
+  if (!data) {
+    adminRawTable.innerHTML = `<tr><td colspan="2">Waiting for station data.</td></tr>`;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const key of Object.keys(data).filter((name) => !["macAddress", "source"].includes(name)).sort()) {
+    const row = document.createElement("tr");
+    const label = document.createElement("td");
+    const value = document.createElement("td");
+    label.textContent = key;
+    value.textContent = formatRawValue(key, data[key]);
+    row.append(label, value);
+    fragment.append(row);
+  }
+  adminRawTable.replaceChildren(fragment);
 }
 
 async function runAction(url, label) {
@@ -109,3 +139,16 @@ function duration(seconds) {
   return days ? `${days}d ${hours}h` : `${hours}h ${Math.floor((value % 3600) / 60)}m`;
 }
 function formatDate(value) { return value ? new Intl.DateTimeFormat([], { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "--"; }
+function formatRawValue(key, value) {
+  const numeric = Number(value);
+  if (key === "dateutc") return `${value} (${formatDate(numeric)})`;
+  if (key === "date") return formatDate(value);
+  if (!Number.isFinite(numeric)) return value === null || value === undefined || value === "" ? "--" : String(value);
+  if (/temp|feelsLike|dewPoint/i.test(key)) return `${compact(numeric)}°F`;
+  if (/humidity|hum/i.test(key)) return `${compact(numeric)}%`;
+  if (/rain/i.test(key)) return `${numeric.toFixed(2)} in`;
+  if (/wind.*mph|mph.*wind/i.test(key)) return `${compact(numeric)} mph`;
+  if (/barom/i.test(key)) return `${numeric.toFixed(2)} inHg`;
+  return compact(numeric);
+}
+function compact(value) { return Math.abs(value) >= 100 ? String(Math.round(value)) : String(Number(value.toFixed(1))); }
