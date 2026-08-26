@@ -460,35 +460,76 @@ small {
   padding: 18px;
 }
 
-.section-heading {
+.section-heading,
+.history-header {
   justify-content: space-between;
   gap: 18px;
   margin-bottom: 14px;
 }
 
-.chart-controls,
-.date-control,
+.history-header {
+  display: flex;
+  align-items: flex-start;
+}
+
+.history-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.history-heading h2 {
+  max-width: 34ch;
+}
+
+.history-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7faf8;
+}
+
+.history-filter-group {
+  display: grid;
+  gap: 6px;
+}
+
+.history-range-group {
+  flex: 1 1 410px;
+}
+
+.history-day-group {
+  flex: 0 1 220px;
+}
+
+.control-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .range-presets {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.date-control label {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 800;
-  white-space: nowrap;
+  gap: 8px;
 }
 
 .date-input {
-  min-height: 42px;
+  width: 100%;
+  min-height: 38px;
   padding: 0 10px;
 }
 
 .range-button {
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: 38px;
+  padding: 0 14px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -501,7 +542,8 @@ small {
 
 .segmented {
   display: inline-grid;
-  grid-template-columns: repeat(4, minmax(78px, 1fr));
+  flex: 0 0 auto;
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
   gap: 6px;
   padding: 5px;
   border: 1px solid var(--line);
@@ -511,9 +553,16 @@ small {
 
 .segment {
   min-height: 36px;
-  padding: 0 12px;
+  padding: 0 10px;
   background: transparent;
   cursor: pointer;
+}
+
+.compare-control {
+  min-height: 38px;
+  margin-bottom: 0;
+  padding: 0 4px;
+  white-space: nowrap;
 }
 
 .segment.active {
@@ -584,14 +633,13 @@ tr:last-child td {
   .topbar-actions,
   .status-strip,
   .primary-reading,
-  .section-heading {
+  .section-heading,
+  .history-header {
     align-items: stretch;
     flex-direction: column;
   }
 
   .topbar-actions,
-  .chart-controls,
-  .date-control,
   .station-select,
   .icon-button {
     width: 100%;
@@ -613,7 +661,21 @@ tr:last-child td {
   }
 
   .health-banner { align-items: flex-start; flex-direction: column; }
-  .compare-control { width: 100%; }
+
+  .history-filters {
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .history-range-group,
+  .history-day-group {
+    flex-basis: 100%;
+  }
+
+  .compare-control {
+    width: 100%;
+    min-height: 34px;
+  }
 
   .primary-reading {
     min-height: auto;
@@ -626,11 +688,6 @@ tr:last-child td {
   .segmented {
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .date-input {
-    flex: 1;
-    min-width: 0;
   }
 
   .range-presets {
