@@ -2,7 +2,7 @@
 
 A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
 
-It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and a private administration page.
+It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and a private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, and includes chart tooltips plus an accessible data table.
 
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
@@ -282,6 +282,7 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 - Enable **Compare previous period** to overlay the preceding day or rolling range as a dashed line and show summary differences.
 - Rainfall totals use the maximum station daily counter for each local calendar day, preventing frequent observations from being double-counted. The dashboard shows today, the last seven days, the current month, the current year, and the wettest day in the analysis period.
 - The administration page can start a 1–365 day Ambient history backfill. Progress remains visible while the server process is running.
+- Raw station packet fields are kept off the main dashboard and remain available under **Administration → Advanced station fields**.
 
 ## Troubleshooting
 

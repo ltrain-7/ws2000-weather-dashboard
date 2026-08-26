@@ -7,7 +7,7 @@
     <title>WS-2000 Administration</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=1.3.1">
+    <link rel="stylesheet" href="/styles.css?v=1.4.0">
   </head>
   <body>
     <main class="app-shell">
@@ -27,7 +27,19 @@
         </div>
         <div id="adminMessage" class="message-box">Ready.</div>
       </section>
+      <section class="admin-panel wide">
+        <details class="admin-details">
+          <summary>Advanced station fields</summary>
+          <p id="adminStationName" class="muted">Latest station packet</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Value</th></tr></thead>
+              <tbody id="adminRawTable"><tr><td colspan="2">Waiting for station data.</td></tr></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
     </main>
-    <script src="/admin.js" defer></script>
+    <script src="/admin.js?v=1.4.0" defer></script>
   </body>
 </html>

@@ -10,14 +10,18 @@ const state = {
   comparisonHistory: [],
   analytics: null,
   stationHealthByMac: new Map(),
-  comparePrevious: localStorage.getItem("comparePrevious") === "true"
+  comparePrevious: localStorage.getItem("comparePrevious") === "true",
+  insightTab: localStorage.getItem("insightTab") || "summary",
+  historyLoading: false,
+  historyError: ""
 };
+
+let chartModel = null;
 
 const els = {
   stationSelect: document.getElementById("stationSelect"),
   refreshBtn: document.getElementById("refreshBtn"),
   statusPill: document.getElementById("statusPill"),
-  stationMeta: document.getElementById("stationMeta"),
   updatedAt: document.getElementById("updatedAt"),
   setupBanner: document.getElementById("setupBanner"),
   healthBanner: document.getElementById("healthBanner"),
@@ -38,22 +42,30 @@ const els = {
   dewPointValue: document.getElementById("dewPointValue"),
   batteryValue: document.getElementById("batteryValue"),
   windDirectionValue: document.getElementById("windDirectionValue"),
+  compass: document.getElementById("compass"),
   compassNeedle: document.getElementById("compassNeedle"),
+  moreConditions: document.getElementById("moreConditions"),
   chartTitle: document.getElementById("chartTitle"),
+  historyOptions: document.getElementById("historyOptions"),
   historyDate: document.getElementById("historyDate"),
   comparePrevious: document.getElementById("comparePrevious"),
   historyChart: document.getElementById("historyChart"),
+  chartTooltip: document.getElementById("chartTooltip"),
+  chartLegend: document.getElementById("chartLegend"),
+  chartMessage: document.getElementById("chartMessage"),
+  chartSummary: document.getElementById("chartSummary"),
+  chartDataTable: document.getElementById("chartDataTable"),
+  summaryGrid: document.getElementById("summaryGrid"),
   comparisonTitle: document.getElementById("comparisonTitle"),
   comparisonGrid: document.getElementById("comparisonGrid"),
-  rainfallGrid: document.getElementById("rainfallGrid"),
-  rawTable: document.getElementById("rawTable")
+  rainfallGrid: document.getElementById("rainfallGrid")
 };
 
 const metricConfig = {
-  tempf: { label: "Temperature", unit: "F", color: "#d45d4c" },
+  tempf: { label: "Temperature", unit: "°F", color: "#c75545" },
   humidity: { label: "Humidity", unit: "%", color: "#0f8b8d" },
   windspeedmph: { label: "Wind speed", unit: "mph", color: "#2f6f9f" },
-  dailyrainin: { label: "Daily rain", unit: "in", color: "#c9901e" }
+  dailyrainin: { label: "Daily rain", unit: "in", color: "#a86f08" }
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -61,6 +73,8 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindEvents();
   setMetricButtons();
+  setInsightTab(state.insightTab);
+  configureResponsiveDisclosures();
   els.comparePrevious.checked = state.comparePrevious;
   els.historyDate.max = toDateInputValue(new Date());
 
@@ -74,7 +88,8 @@ async function init() {
     registerServiceWorker();
   } catch (error) {
     setStatus("error", "Offline");
-    els.stationMeta.textContent = error.message;
+    els.healthTitle.textContent = "Weather service unavailable";
+    els.healthDetail.textContent = error.message;
     renderEmpty();
   }
 }
@@ -94,13 +109,14 @@ function bindEvents() {
       applyState(latest);
       await loadHistory();
     } catch (error) {
-      els.stationMeta.textContent = error.message;
+      els.healthDetail.textContent = error.message;
     } finally {
       els.refreshBtn.disabled = false;
     }
   });
 
-  document.querySelectorAll("[data-metric]").forEach((button) => {
+  const metricButtons = Array.from(document.querySelectorAll("[data-metric]"));
+  metricButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.chartMetric = button.dataset.metric;
       localStorage.setItem("chartMetric", state.chartMetric);
@@ -108,6 +124,13 @@ function bindEvents() {
       drawChart();
     });
   });
+  bindTabKeyboard(metricButtons, (button) => button.click());
+
+  const insightButtons = Array.from(document.querySelectorAll("[data-insight]"));
+  insightButtons.forEach((button) => {
+    button.addEventListener("click", () => setInsightTab(button.dataset.insight));
+  });
+  bindTabKeyboard(insightButtons, (button) => button.click());
 
   els.historyDate.addEventListener("change", async () => {
     state.historyDate = els.historyDate.value;
@@ -130,9 +153,16 @@ function bindEvents() {
     state.comparePrevious = els.comparePrevious.checked;
     localStorage.setItem("comparePrevious", String(state.comparePrevious));
     await loadHistory();
+    if (state.comparePrevious) setInsightTab("comparison");
   });
 
-  window.addEventListener("resize", drawChart);
+  els.historyChart.addEventListener("pointermove", showChartTooltip);
+  els.historyChart.addEventListener("pointerleave", hideChartTooltip);
+  els.historyChart.addEventListener("pointercancel", hideChartTooltip);
+  window.addEventListener("resize", () => {
+    hideChartTooltip();
+    drawChart();
+  });
 }
 
 function connectEventStream() {
@@ -202,6 +232,9 @@ async function loadHistory() {
     return;
   }
 
+  state.historyLoading = true;
+  state.historyError = "";
+  drawChart();
   try {
     const historicalView = Boolean(state.historyDate || state.historyRangeDays);
     const limit = historicalView ? 10000 : state.config?.historyLimit || 96;
@@ -233,8 +266,11 @@ async function loadHistory() {
       state.analytics = null;
     }
   } catch {
+    state.historyError = "Stored history could not be loaded. Showing the latest available reading.";
     state.history = liveOnlyHistory();
     state.comparisonHistory = [];
+  } finally {
+    state.historyLoading = false;
   }
   drawChart();
   renderInsights();
@@ -283,14 +319,14 @@ function render() {
 
   if (!data) {
     renderEmpty();
-    if (device) {
-      els.stationMeta.textContent = stationSubtitle(device);
-    }
     return;
   }
 
-  els.stationMeta.textContent = device ? stationSubtitle(device) : shortMac(data.macAddress);
-  els.updatedAt.textContent = data.dateutc ? `Updated ${formatTime(data.dateutc)}` : "--";
+  els.updatedAt.textContent = data.dateutc ? formatTime(data.dateutc) : "--";
+  if (data.dateutc) {
+    els.updatedAt.dateTime = new Date(Number(data.dateutc)).toISOString();
+    els.updatedAt.setAttribute("aria-label", `Exact update time ${formatTime(data.dateutc)}`);
+  }
   els.temperatureValue.textContent = formatTemp(data.tempf);
   els.feelsLikeValue.textContent = `Feels like ${formatTemp(data.feelsLike)}`;
   els.humidityValue.textContent = formatPercent(data.humidity);
@@ -305,10 +341,11 @@ function render() {
   els.uvValue.textContent = `UV ${formatValue(data.uv)}`;
   els.dewPointValue.textContent = formatTemp(data.dewPoint);
   els.batteryValue.textContent = formatBattery(data.battout);
-  els.windDirectionValue.textContent = compassText(data.winddir);
+  const direction = compassText(data.winddir);
+  els.windDirectionValue.textContent = direction;
+  els.compass.setAttribute("aria-label", Number.isFinite(Number(data.winddir)) ? `Wind direction ${direction}, ${Math.round(Number(data.winddir))} degrees` : "Wind direction unavailable");
   els.compassNeedle.style.transform = `rotate(${Number(data.winddir || 0)}deg)`;
   renderHealth();
-  renderRawTable(data);
 }
 
 function renderEmpty() {
@@ -327,30 +364,14 @@ function renderEmpty() {
   els.dewPointValue.textContent = "--";
   els.batteryValue.textContent = "--";
   els.windDirectionValue.textContent = "--";
+  els.compass.setAttribute("aria-label", "Wind direction unavailable");
   els.compassNeedle.style.transform = "rotate(0deg)";
-  els.rawTable.innerHTML = `<tr><td colspan="2">Waiting for data</td></tr>`;
   els.updatedAt.textContent = "--";
   renderHealth();
 }
 
-function renderRawTable(data) {
-  const visibleKeys = Object.keys(data)
-    .filter((key) => !["macAddress", "source"].includes(key))
-    .sort((a, b) => a.localeCompare(b));
-
-  els.rawTable.innerHTML = "";
-  for (const key of visibleKeys) {
-    const row = document.createElement("tr");
-    const label = document.createElement("td");
-    const value = document.createElement("td");
-    label.textContent = key;
-    value.textContent = formatRawValue(key, data[key]);
-    row.append(label, value);
-    els.rawTable.append(row);
-  }
-}
-
 function drawChart() {
+  hideChartTooltip();
   const canvas = els.historyChart;
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -362,6 +383,7 @@ function drawChart() {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
+  chartModel = null;
 
   const metric = metricConfig[state.chartMetric] || metricConfig.tempf;
   const rangeTitle = state.historyDate
@@ -371,17 +393,21 @@ function drawChart() {
       : "Latest readings";
   els.chartTitle.textContent = `${rangeTitle}${trendMethodLabel()}`;
   canvas.setAttribute("aria-label", `${metric.label} history chart: ${els.chartTitle.textContent}`);
+  els.chartLegend.innerHTML = "";
+  els.chartMessage.textContent = "";
+  els.chartSummary.textContent = "";
+  els.chartDataTable.innerHTML = "";
 
   const rawPoints = normalizeHistory(state.history)
     .map((item) => ({
-      at: item.dateutc || Date.parse(item.date || ""),
+      at: Number(item.dateutc || Date.parse(item.date || "")),
       value: Number(item[state.chartMetric])
     }))
     .filter((point) => Number.isFinite(point.at) && Number.isFinite(point.value));
   const points = trendPoints(rawPoints);
   const comparisonPoints = trendPointsFor(
     normalizeHistory(state.comparisonHistory)
-      .map((item) => ({ at: item.dateutc || Date.parse(item.date || ""), value: Number(item[state.chartMetric]) }))
+      .map((item) => ({ at: Number(item.dateutc || Date.parse(item.date || "")), value: Number(item[state.chartMetric]) }))
       .filter((point) => Number.isFinite(point.at) && Number.isFinite(point.value))
   );
 
@@ -391,42 +417,46 @@ function drawChart() {
 
   drawChartFrame(ctx, width, height, pad);
 
+  if (state.historyLoading) {
+    els.chartMessage.textContent = "Loading chart data…";
+    drawEmptyChartLabel(ctx, pad.left, height / 2, "Loading chart data…");
+    return;
+  }
+
   if (points.length < 2) {
-    ctx.fillStyle = "#667579";
-    ctx.font = "14px system-ui, sans-serif";
-    ctx.fillText(
-      state.historyDate || state.historyRangeDays
-        ? "No readings stored for this period"
-        : "Waiting for enough readings",
-      pad.left,
-      height / 2
-    );
+    const message = state.historyError || (state.historyDate || state.historyRangeDays
+      ? "No readings are stored for this period."
+      : "Waiting for enough readings to draw a trend.");
+    els.chartMessage.textContent = message;
+    drawEmptyChartLabel(ctx, pad.left, height / 2, message);
+    renderChartData(points, comparisonPoints, metric);
     return;
   }
 
   const values = [...points, ...comparisonPoints].map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
+  const currentMin = Math.min(...points.map((point) => point.value));
+  const currentMax = Math.max(...points.map((point) => point.value));
   const span = max - min || 1;
   const yMin = min - span * 0.12;
   const yMax = max + span * 0.12;
   const xMin = points[0].at;
   const xMax = points[points.length - 1].at;
-  const xSpan = xMax - xMin || 1;
 
   drawYAxis(ctx, pad, chartWidth, chartHeight, yMin, yMax, metric.unit);
 
-  drawSeries(ctx, points, pad, chartWidth, chartHeight, yMin, yMax, metric.color, false);
-  if (comparisonPoints.length > 1) {
-    drawSeries(ctx, comparisonPoints, pad, chartWidth, chartHeight, yMin, yMax, "#7b8588", true);
-  }
+  const currentProjection = projectSeries(points, pad, chartWidth, chartHeight, yMin, yMax);
+  const previousProjection = comparisonPoints.length > 1
+    ? projectSeries(comparisonPoints, pad, chartWidth, chartHeight, yMin, yMax)
+    : [];
+  drawProjectedSeries(ctx, currentProjection, metric.color, false);
+  drawProjectedSeries(ctx, previousProjection, "#707c7f", true);
 
-  const last = points[points.length - 1];
-  const lastX = pad.left + ((last.at - xMin) / xSpan) * chartWidth;
-  const lastY = pad.top + (1 - (last.value - yMin) / (yMax - yMin)) * chartHeight;
+  const last = currentProjection[currentProjection.length - 1];
   ctx.fillStyle = metric.color;
   ctx.beginPath();
-  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = "#667579";
@@ -434,6 +464,26 @@ function drawChart() {
   ctx.fillText(formatTime(points[0].at), pad.left, height - 10);
   const endLabel = formatTime(points[points.length - 1].at);
   ctx.fillText(endLabel, width - pad.right - ctx.measureText(endLabel).width, height - 10);
+
+  chartModel = {
+    metric,
+    bounds: { left: pad.left, right: width - pad.right, top: pad.top, bottom: height - pad.bottom },
+    points: [
+      ...currentProjection.map((point) => ({ ...point, series: "Current period" })),
+      ...previousProjection.map((point) => ({ ...point, series: "Previous period" }))
+    ]
+  };
+  renderChartLegend(metric, previousProjection.length > 1);
+  els.chartMessage.textContent = state.historyError;
+  const latest = points[points.length - 1];
+  els.chartSummary.textContent = `${metric.label}: ${points.length} plotted values from ${formatTime(xMin)} to ${formatTime(xMax)}. Minimum ${formatMetricValue(metric, currentMin)}, maximum ${formatMetricValue(metric, currentMax)}, latest ${formatMetricValue(metric, latest.value)}.`;
+  renderChartData(points, comparisonPoints, metric);
+}
+
+function drawEmptyChartLabel(ctx, x, y, message) {
+  ctx.fillStyle = "#59696d";
+  ctx.font = "14px system-ui, sans-serif";
+  ctx.fillText(message, x, y);
 }
 
 function drawChartFrame(ctx, width, height, pad) {
@@ -458,7 +508,7 @@ function drawYAxis(ctx, pad, chartWidth, chartHeight, min, max, unit) {
   for (let index = 0; index <= 4; index += 1) {
     const value = max - ((max - min) / 4) * index;
     const y = pad.top + (chartHeight / 4) * index + 4;
-    const label = `${compactNumber(value)} ${unit}`;
+    const label = formatUnitValue(value, unit);
     ctx.fillText(label, 6, y);
   }
 }
@@ -507,7 +557,10 @@ async function fetchJson(url, options = {}) {
 
 function setMetricButtons() {
   document.querySelectorAll("[data-metric]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.metric === state.chartMetric);
+    const selected = button.dataset.metric === state.chartMetric;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
   });
 }
 
@@ -518,7 +571,60 @@ function setRangeButtons() {
       "active",
       !state.historyDate && days === state.historyRangeDays
     );
+    button.setAttribute("aria-pressed", String(!state.historyDate && days === state.historyRangeDays));
   });
+}
+
+function setInsightTab(value) {
+  const allowed = ["summary", "comparison", "rainfall"];
+  state.insightTab = allowed.includes(value) ? value : "summary";
+  localStorage.setItem("insightTab", state.insightTab);
+  document.querySelectorAll("[data-insight]").forEach((button) => {
+    const selected = button.dataset.insight === state.insightTab;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll("[data-insight-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.insightPanel !== state.insightTab;
+  });
+}
+
+function bindTabKeyboard(buttons, activate) {
+  buttons.forEach((button, index) => {
+    button.addEventListener("keydown", (event) => {
+      let next = null;
+      if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (index + 1) % buttons.length;
+      if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (index - 1 + buttons.length) % buttons.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = buttons.length - 1;
+      if (next === null) return;
+      event.preventDefault();
+      activate(buttons[next]);
+      buttons[next].focus();
+    });
+  });
+}
+
+function configureResponsiveDisclosures() {
+  const mobile = window.matchMedia("(max-width: 760px)");
+  const apply = () => {
+    if (!mobile.matches) {
+      els.moreConditions.open = true;
+      els.historyOptions.open = true;
+      return;
+    }
+    els.moreConditions.open = localStorage.getItem("moreConditionsOpen") === "true";
+    els.historyOptions.open = localStorage.getItem("historyOptionsOpen") === "true";
+  };
+  els.moreConditions.addEventListener("toggle", () => {
+    if (mobile.matches) localStorage.setItem("moreConditionsOpen", String(els.moreConditions.open));
+  });
+  els.historyOptions.addEventListener("toggle", () => {
+    if (mobile.matches) localStorage.setItem("historyOptionsOpen", String(els.historyOptions.open));
+  });
+  mobile.addEventListener("change", apply);
+  apply();
 }
 
 function trendPoints(points) {
@@ -537,16 +643,23 @@ function trendPointsFor(points) {
   return rollingAverage(points, smoothingHours * 60 * 60 * 1000);
 }
 
-function drawSeries(ctx, points, pad, chartWidth, chartHeight, yMin, yMax, color, dashed) {
-  if (points.length < 2) return;
+function projectSeries(points, pad, chartWidth, chartHeight, yMin, yMax) {
+  if (!points.length) return [];
   const firstAt = points[0].at;
   const timeSpan = points[points.length - 1].at - firstAt || 1;
+  return points.map((point) => ({
+    ...point,
+    x: pad.left + ((point.at - firstAt) / timeSpan) * chartWidth,
+    y: pad.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartHeight
+  }));
+}
+
+function drawProjectedSeries(ctx, points, color, dashed) {
+  if (points.length < 2) return;
   ctx.beginPath();
   points.forEach((point, index) => {
-    const x = pad.left + ((point.at - firstAt) / timeSpan) * chartWidth;
-    const y = pad.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartHeight;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (index === 0) ctx.moveTo(point.x, point.y);
+    else ctx.lineTo(point.x, point.y);
   });
   ctx.strokeStyle = color;
   ctx.lineWidth = dashed ? 2 : 3;
@@ -557,44 +670,109 @@ function drawSeries(ctx, points, pad, chartWidth, chartHeight, yMin, yMax, color
   ctx.setLineDash([]);
 }
 
-function renderHealth() {
-  const health = state.stationHealthByMac.get(state.selectedMac);
-  els.healthBanner.className = `health-banner ${health?.status || "unknown"}`;
-  if (!health) {
-    els.healthTitle.textContent = "Station health unknown";
-    els.healthDetail.textContent = "Waiting for the first stored reading.";
+function renderChartLegend(metric, hasPrevious) {
+  const current = `<span class="legend-item"><span class="legend-swatch" style="background:${metric.color}"></span>Current period</span>`;
+  const previous = hasPrevious ? `<span class="legend-item"><span class="legend-swatch previous"></span>Previous period</span>` : "";
+  els.chartLegend.innerHTML = current + previous;
+}
+
+function renderChartData(points, comparisonPoints, metric) {
+  const fragment = document.createDocumentFragment();
+  for (const [label, series] of [["Current", points], ["Previous", comparisonPoints]]) {
+    for (const point of series) {
+      const row = document.createElement("tr");
+      for (const text of [label, formatTime(point.at), formatMetricValue(metric, point.value)]) {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        row.append(cell);
+      }
+      fragment.append(row);
+    }
+  }
+  if (!fragment.childNodes.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.textContent = "No chart data for this period.";
+    row.append(cell);
+    fragment.append(row);
+  }
+  els.chartDataTable.replaceChildren(fragment);
+}
+
+function showChartTooltip(event) {
+  if (!chartModel?.points.length) return;
+  const rect = els.historyChart.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const { bounds } = chartModel;
+  if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
+    hideChartTooltip();
     return;
   }
-  els.healthTitle.textContent = health.status === "online" ? "Station online" : health.status === "warning" ? "Station needs attention" : "Station offline";
+  const closest = chartModel.points.reduce((best, point) => {
+    const distance = Math.hypot(point.x - x, (point.y - y) * 0.7);
+    return !best || distance < best.distance ? { point, distance } : best;
+  }, null)?.point;
+  if (!closest) return;
+  els.chartTooltip.textContent = `${closest.series} · ${formatTime(closest.at)} · ${formatMetricValue(chartModel.metric, closest.value)}`;
+  els.chartTooltip.style.left = `${Math.min(rect.width - 80, Math.max(80, closest.x))}px`;
+  els.chartTooltip.style.top = `${Math.max(36, closest.y)}px`;
+  els.chartTooltip.hidden = false;
+}
+
+function hideChartTooltip() {
+  els.chartTooltip.hidden = true;
+}
+
+function renderHealth() {
+  const health = state.stationHealthByMac.get(state.selectedMac);
+  const device = selectedDevice();
+  const data = selectedData();
+  els.healthBanner.className = `station-status ${health?.status || "unknown"}`;
+  els.healthTitle.textContent = device ? stationSubtitle(device) : "Weather station";
+  if (!health) {
+    els.healthDetail.textContent = data?.dateutc ? formatRelativeAge(data.dateutc) : "Waiting for the first reading.";
+    return;
+  }
+  els.statusPill.className = `status-pill ${health.status}`;
+  els.statusPill.textContent = health.status === "online" ? "Online" : health.status === "warning" ? "Attention" : "Offline";
   const details = [];
-  if (Number.isFinite(health.ageMinutes)) details.push(`Last reading ${compactNumber(health.ageMinutes)} minutes ago`);
-  if (health.batteryLow) details.push("outdoor battery reports low");
-  details.push(`source: ${health.source || "unknown"}`);
+  if (data?.dateutc) details.push(formatRelativeAge(data.dateutc));
+  else if (Number.isFinite(health.ageMinutes)) details.push(formatAgeMinutes(health.ageMinutes));
+  details.push(health.batteryLow ? "Battery low" : "Battery OK");
   els.healthDetail.textContent = details.join(" · ");
 }
 
 function renderInsights() {
   const analytics = state.analytics;
-  if (!analytics?.current) return;
+  if (!analytics?.current) {
+    const message = `<p class="muted">No stored insights are available for this period.</p>`;
+    els.summaryGrid.innerHTML = message;
+    els.comparisonGrid.innerHTML = message;
+    els.rainfallGrid.innerHTML = message;
+    return;
+  }
   const current = state.historyDate ? summarizeHistory(state.history) : analytics.current;
   const previous = state.historyDate ? summarizeHistory(state.comparisonHistory) : analytics.previous;
   els.comparisonTitle.textContent = state.historyDate ? `${formatSelectedDate(state.historyDate)} vs previous day` : state.historyRangeDays ? `Last ${state.historyRangeDays} days vs previous` : "Last 24 hours vs previous";
   const comparisons = [
-    ["Average temp", current.averageTempf, previous?.averageTempf, " F"],
+    ["Average temp", current.averageTempf, previous?.averageTempf, "°F"],
     ["Average humidity", current.averageHumidity, previous?.averageHumidity, "%"],
-    ["Peak gust", current.maximumGustMph, previous?.maximumGustMph, " mph"],
-    ["Rainfall", current.rainfallTotalIn, previous?.rainfallTotalIn, " in"]
+    ["Peak gust", current.maximumGustMph, previous?.maximumGustMph, "mph"],
+    ["Rainfall", current.rainfallTotalIn, previous?.rainfallTotalIn, "in"]
   ];
+  els.summaryGrid.innerHTML = comparisons.map(([label, value, , unit]) => statCard(label, value, null, unit)).join("");
   els.comparisonGrid.innerHTML = comparisons.map(([label, value, prior, unit]) => statCard(label, value, prior, unit)).join("");
   const rain = analytics.rainfall || {};
   const wettest = current.wettestDay;
   els.rainfallGrid.innerHTML = [
-    ["Today", rain.day?.rainfallTotalIn, null, " in"],
-    ["Last 7 days", rain.week?.rainfallTotalIn, null, " in"],
-    ["This month", rain.month?.rainfallTotalIn, null, " in"],
-    ["This year", rain.year?.rainfallTotalIn, null, " in"]
+    ["Today", rain.day?.rainfallTotalIn, null, "in"],
+    ["Last 7 days", rain.week?.rainfallTotalIn, null, "in"],
+    ["This month", rain.month?.rainfallTotalIn, null, "in"],
+    ["This year", rain.year?.rainfallTotalIn, null, "in"]
   ].map(([label, value, prior, unit]) => statCard(label, value, prior, unit)).join("") +
-    `<div class="stat-card"><span>Wettest day</span><strong>${wettest ? `${wettest.day} · ${Number(wettest.rainIn).toFixed(2)} in` : "--"}</strong></div>`;
+    `<div class="stat-card"><span>Wettest day</span><strong>${wettest ? `${formatDateOnly(wettest.day)} · ${Number(wettest.rainIn).toFixed(2)} in` : "--"}</strong></div>`;
 }
 
 function summarizeHistory(history) {
@@ -614,11 +792,12 @@ function summarizeHistory(history) {
 function statCard(label, value, previous, unit) {
   const numeric = Number(value);
   const previousNumber = Number(previous);
-  const rendered = Number.isFinite(numeric) ? `${numeric.toFixed(unit === " in" ? 2 : 1)}${unit}` : "--";
+  const hasPrevious = previous !== null && previous !== undefined && previous !== "" && Number.isFinite(previousNumber);
+  const rendered = Number.isFinite(numeric) ? formatUnitValue(numeric, unit, unit === "in" ? 2 : 1) : "--";
   let delta = "";
-  if (Number.isFinite(numeric) && Number.isFinite(previousNumber)) {
+  if (Number.isFinite(numeric) && hasPrevious) {
     const difference = numeric - previousNumber;
-    delta = `<small>${difference >= 0 ? "+" : ""}${difference.toFixed(unit === " in" ? 2 : 1)}${unit} vs previous</small>`;
+    delta = `<small>${difference >= 0 ? "+" : ""}${formatUnitValue(difference, unit, unit === "in" ? 2 : 1)} vs previous</small>`;
   }
   return `<div class="stat-card"><span>${label}</span><strong>${rendered}</strong>${delta}</div>`;
 }
@@ -683,24 +862,17 @@ function statusLabel(status) {
 }
 
 function stationName(device) {
-  return device.info?.name || shortMac(device.macAddress);
+  return device.info?.name || "Weather station";
 }
 
 function stationSubtitle(device) {
   const pieces = [stationName(device)];
   if (device.info?.location) pieces.push(device.info.location);
-  pieces.push(shortMac(device.macAddress));
   return pieces.filter(Boolean).join(" | ");
 }
 
-function shortMac(macAddress) {
-  if (!macAddress) return "";
-  const parts = macAddress.split(":");
-  return parts.length > 2 ? `...${parts.slice(-3).join(":")}` : macAddress;
-}
-
 function formatTemp(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)} F` : "--";
+  return Number.isFinite(Number(value)) ? `${round(value)}°F` : "--";
 }
 
 function formatPercent(value) {
@@ -720,7 +892,7 @@ function formatRain(value) {
 }
 
 function formatSolar(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)} W/m2` : "--";
+  return Number.isFinite(Number(value)) ? `${round(value)} W/m²` : "--";
 }
 
 function formatBattery(value) {
@@ -731,19 +903,6 @@ function formatBattery(value) {
 function formatValue(value) {
   if (value === undefined || value === null || value === "") return "--";
   return Number.isFinite(Number(value)) ? compactNumber(value) : String(value);
-}
-
-function formatRawValue(key, value) {
-  if (key === "dateutc") return `${value} (${formatTime(value)})`;
-  if (key === "date") return formatTime(Date.parse(value));
-  if (key.includes("temp") || key.includes("feelsLike") || key.includes("dewPoint")) {
-    return formatTemp(value);
-  }
-  if (key.includes("humidity") || key.includes("hum")) return formatPercent(value);
-  if (key.includes("rain")) return formatRain(value);
-  if (key.includes("wind") && key.includes("mph")) return formatWind(value);
-  if (key.includes("barom")) return formatPressure(value);
-  return formatValue(value);
 }
 
 function compassText(degrees) {
@@ -779,6 +938,33 @@ function formatTime(value) {
     hour: "numeric",
     minute: "2-digit"
   }).format(date);
+}
+
+function formatRelativeAge(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return "Update time unavailable";
+  return formatAgeMinutes(Math.max(0, (Date.now() - timestamp) / 60000));
+}
+
+function formatAgeMinutes(value) {
+  const minutes = Math.max(0, Number(value));
+  if (!Number.isFinite(minutes)) return "Update time unavailable";
+  if (minutes < 1.5) return "Updated just now";
+  if (minutes < 60) return `Updated ${Math.round(minutes)} min ago`;
+  const hours = Math.round(minutes / 60);
+  return `Updated ${hours} hr${hours === 1 ? "" : "s"} ago`;
+}
+
+function formatUnitValue(value, unit, digits = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "--";
+  const rendered = digits === null ? compactNumber(numeric) : numeric.toFixed(digits);
+  return ["%", "°F"].includes(unit) ? `${rendered}${unit}` : `${rendered} ${unit}`;
+}
+
+function formatMetricValue(metric, value) {
+  const digits = metric.unit === "in" ? 2 : null;
+  return formatUnitValue(value, metric.unit, digits);
 }
 
 function historyDateRange(value) {
@@ -826,6 +1012,11 @@ function formatSelectedDate(value) {
     day: "numeric",
     year: "numeric"
   }).format(date);
+}
+
+function formatDateOnly(value) {
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat([], { month: "short", day: "numeric" }).format(date);
 }
 
 function round(value) {
