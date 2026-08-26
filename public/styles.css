@@ -239,15 +239,17 @@ h2 { font-size: 1.08rem; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   min-width: 0;
   min-height: 174px;
   padding: 22px;
 }
+.primary-reading > div:first-child { min-width: 0; }
 
 .reading-label { margin: 0 0 3px; color: var(--muted); font-weight: 800; }
 .temperature-value {
   margin: 0;
-  font-size: clamp(3rem, 5.8vw, 4.8rem);
+  font-size: clamp(3rem, 5vw, 3.9rem);
   font-weight: 850;
   line-height: 0.98;
   white-space: nowrap;
@@ -256,9 +258,9 @@ h2 { font-size: 1.08rem; }
 .compass {
   position: relative;
   display: grid;
-  width: 106px;
-  height: 106px;
-  flex: 0 0 106px;
+  width: 92px;
+  height: 92px;
+  flex: 0 0 92px;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 50%;
@@ -398,6 +400,15 @@ tr:last-child td { border-bottom: 0; }
   .current-conditions { grid-template-columns: 1fr; }
   .essential-grid .metric-card { min-height: 124px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 761px) and (max-height: 900px) {
+  .primary-reading, .essential-grid .metric-card { min-height: 150px; }
+  .more-conditions { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+  .more-conditions > summary { display: flex; align-items: center; padding: 0 14px; }
+  .more-conditions[open] > summary { border-bottom: 1px solid var(--line); }
+  .more-conditions .secondary-grid { padding: 10px; }
+  #historyChart { height: clamp(210px, calc(100vh - 640px), 280px); }
 }
 
 @media (max-width: 760px) {
