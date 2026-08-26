@@ -1,0 +1,17 @@
+{
+  "name": "WS-2000 Weather Dashboard",
+  "short_name": "WS-2000",
+  "description": "Private local Ambient Weather station dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f0",
+  "theme_color": "#0f8b8d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
