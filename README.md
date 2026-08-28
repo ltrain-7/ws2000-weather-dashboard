@@ -109,7 +109,20 @@ chmod 750 /volume1/docker/ws2000-dashboard/data
 /usr/local/bin/docker compose restart
 ```
 
-Allow TCP port `3000` in **Control Panel → Security → Firewall** only for trusted local-network ranges. Do not expose the dashboard directly to the internet.
+### Private, trusted HTTPS on DSM
+
+A DSM installation can use a browser-trusted certificate while remaining completely private. The recommended design is:
+
+- private LAN DNS maps names such as `nas.example.com` and `weather.example.com` to the NAS address;
+- Let's Encrypt validates domain ownership with DNS-01 TXT records, so no public A/AAAA record or router port forwarding is required;
+- one SAN certificate covers both the DSM and weather hostnames;
+- DSM terminates HTTPS and proxies the weather hostname to `http://127.0.0.1:3000`;
+- the dashboard binds only to loopback, trusts only DSM's HTTPS proxy indication, and protects administration with its built-in login; and
+- a root-only DNS API token plus the DSM deployment hook renews and imports the certificate automatically.
+
+The DNS TXT challenge and certificate hostnames are public, but the NAS and application do not become publicly reachable. See [Private DSM HTTPS with DNS-01](docs/HTTPS.md#private-dsm-https-with-dns-01) for the complete GoDaddy-compatible procedure, SAN setup, renewal, certificate assignment, verification, and troubleshooting.
+
+For the initial HTTP-only setup, allow TCP port `3000` in **Control Panel → Security → Firewall** only for trusted local-network ranges. After configuring DSM HTTPS and authentication, bind the port to `127.0.0.1:3000` and remove the LAN firewall allowance. Never expose the dashboard directly to the internet.
 
 To backfill the preceding 90 days after the station connects:
 
