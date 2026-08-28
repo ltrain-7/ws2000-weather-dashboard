@@ -3,6 +3,7 @@ const https = require("node:https");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const { AdminAuth } = require("./auth");
 const { createWeatherStore } = require("./storage");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -17,6 +18,15 @@ const HOST = process.env.HOST || "0.0.0.0";
 const TLS_ENABLED = booleanFromEnv("TLS_ENABLED", false);
 const TLS_CERT_PATH = clean(process.env.TLS_CERT_PATH) || "/app/certs/fullchain.pem";
 const TLS_KEY_PATH = clean(process.env.TLS_KEY_PATH) || "/app/certs/privkey.pem";
+const ADMIN_AUTH_ENABLED = booleanFromEnv("ADMIN_AUTH_ENABLED", false);
+const ADMIN_TRUST_PROXY = booleanFromEnv("ADMIN_TRUST_PROXY", false);
+const ADMIN_USERNAME = clean(process.env.ADMIN_USERNAME) || "admin";
+const ADMIN_SESSION_TTL_MINUTES = clamp(
+  numberFromEnv("ADMIN_SESSION_TTL_MINUTES", 480),
+  5,
+  1440
+);
+const ADMIN_PASSWORD_HASH = loadAdminPasswordHash();
 const APPLICATION_KEY = clean(process.env.AMBIENT_APPLICATION_KEY);
 const API_KEYS = parseApiKeys();
 const DEFAULT_DEVICE_MAC = clean(process.env.AMBIENT_DEVICE_MAC);
@@ -39,6 +49,21 @@ const BACKUP_INTERVAL_HOURS = clamp(numberFromEnv("BACKUP_INTERVAL_HOURS", 24), 
 const BACKUP_RETENTION_DAYS = clamp(numberFromEnv("BACKUP_RETENTION_DAYS", 90), 0, 3650);
 const BACKUP_MAX_FILES = clamp(numberFromEnv("BACKUP_MAX_FILES", 12), 0, 1000);
 const STATION_STALE_MINUTES = clamp(numberFromEnv("STATION_STALE_MINUTES", 15), 2, 1440);
+const ADMIN_COOKIE_NAME = "__Host-weather_session";
+const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
+
+if (ADMIN_AUTH_ENABLED && !ADMIN_PASSWORD_HASH) {
+  throw new Error(
+    "ADMIN_AUTH_ENABLED is true but ADMIN_PASSWORD_HASH or ADMIN_PASSWORD_HASH_FILE is not configured."
+  );
+}
+
+const adminAuth = new AdminAuth({
+  enabled: ADMIN_AUTH_ENABLED,
+  username: ADMIN_USERNAME,
+  passwordHash: ADMIN_PASSWORD_HASH,
+  sessionTtlMs: ADMIN_SESSION_TTL_MINUTES * 60 * 1000
+});
 
 const configured = Boolean(APPLICATION_KEY && API_KEYS.length);
 const clients = new Set();
@@ -103,10 +128,37 @@ const requestHandler = async (req, res) => {
       return;
     }
 
+    if (requestUrl.pathname === "/admin") {
+      redirect(res, "/admin.html");
+      return;
+    }
+
+    if (requestUrl.pathname === "/login.html" && !ADMIN_AUTH_ENABLED) {
+      redirect(res, "/admin.html");
+      return;
+    }
+
+    if (PROTECTED_ADMIN_ASSETS.has(requestUrl.pathname) && ADMIN_AUTH_ENABLED) {
+      const session = adminSession(req);
+      if (!session) {
+        if (requestUrl.pathname === "/admin.html") {
+          redirect(res, "/login.html?next=%2Fadmin.html");
+        } else {
+          sendText(res, 401, "Authentication required.", { "cache-control": "no-store" });
+        }
+        return;
+      }
+    }
+
     await serveStatic(requestUrl, res);
   } catch (error) {
-    recordError(error);
-    sendJson(res, 500, { error: "Unexpected server error." });
+    const statusCode = Number(error.statusCode);
+    if (statusCode >= 400 && statusCode < 500) {
+      sendJson(res, statusCode, { error: error.message }, { "cache-control": "no-store" });
+    } else {
+      recordError(error);
+      sendJson(res, 500, { error: "Unexpected server error." });
+    }
   }
 };
 
@@ -160,6 +212,17 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
 async function handleApi(req, res, requestUrl) {
+  if (requestUrl.pathname.startsWith("/api/auth/")) {
+    await handleAuthApi(req, res, requestUrl);
+    return;
+  }
+
+  let authenticatedAdmin = null;
+  if (requestUrl.pathname === "/api/admin" || requestUrl.pathname.startsWith("/api/admin/")) {
+    authenticatedAdmin = requireAdminSession(req, res);
+    if (!authenticatedAdmin) return;
+  }
+
   if (req.method === "GET" && requestUrl.pathname === "/api/health") {
     sendJson(res, 200, {
       ok: true,
@@ -184,6 +247,7 @@ async function handleApi(req, res, requestUrl) {
       liveHistoryLimit: LIVE_HISTORY_LIMIT,
       historyRetentionDays: HISTORY_RETENTION_DAYS,
       tlsEnabled: TLS_ENABLED,
+      adminAuthEnabled: ADMIN_AUTH_ENABLED,
       stationStaleMinutes: STATION_STALE_MINUTES,
       storage: storage.getStatus()
     });
@@ -201,33 +265,24 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (req.method === "GET" && requestUrl.pathname === "/api/admin") {
-    sendJson(res, 200, adminStatus());
+    sendJson(res, 200, adminStatus(), { "cache-control": "no-store" });
     return;
   }
 
   if (req.method === "POST" && requestUrl.pathname === "/api/admin/backup") {
-    if (!isSameOriginAdminRequest(req)) {
-      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
-      return;
-    }
+    if (!authorizeAdminMutation(req, res, authenticatedAdmin)) return;
     sendJson(res, 202, await runBackup("manual"));
     return;
   }
 
   if (req.method === "POST" && requestUrl.pathname === "/api/admin/integrity") {
-    if (!isSameOriginAdminRequest(req)) {
-      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
-      return;
-    }
+    if (!authorizeAdminMutation(req, res, authenticatedAdmin)) return;
     sendJson(res, 200, storage.integrityCheck());
     return;
   }
 
   if (req.method === "POST" && requestUrl.pathname === "/api/admin/backfill") {
-    if (!isSameOriginAdminRequest(req)) {
-      sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." });
-      return;
-    }
+    if (!authorizeAdminMutation(req, res, authenticatedAdmin)) return;
     const days = clamp(Number(requestUrl.searchParams.get("days") || 90), 1, 365);
     const macAddress = clean(requestUrl.searchParams.get("mac")) || firstKnownMac();
     if (!configured || !macAddress) {
@@ -376,9 +431,11 @@ async function serveStatic(requestUrl, res) {
   }
 
   const contentType = mimeTypes.get(path.extname(filePath)) || "application/octet-stream";
+  const sensitiveAsset = ["/admin.html", "/admin.js", "/login.html", "/login.js"].includes(decodedPath);
   res.writeHead(200, {
     "content-type": contentType,
-    "cache-control": "no-cache, must-revalidate"
+    "cache-control": sensitiveAsset ? "no-store" : "no-cache, must-revalidate",
+    ...securityHeaders()
   });
   fs.createReadStream(filePath).pipe(res);
 }
@@ -718,7 +775,8 @@ function adminStatus() {
       nodeVersion: process.version,
       startedAt: STARTED_AT,
       uptimeSeconds: Math.round(process.uptime()),
-      tlsEnabled: TLS_ENABLED
+      tlsEnabled: TLS_ENABLED,
+      adminAuthEnabled: ADMIN_AUTH_ENABLED
     },
     configured,
     connections: { rest: state.rest, realtime: state.realtime },
@@ -735,6 +793,186 @@ function adminStatus() {
     backfill: state.backfill,
     recentErrors: state.errors.slice(-10)
   };
+}
+
+async function handleAuthApi(req, res, requestUrl) {
+  if (req.method === "GET" && requestUrl.pathname === "/api/auth/status") {
+    const session = adminSession(req);
+    sendJson(
+      res,
+      200,
+      {
+        enabled: ADMIN_AUTH_ENABLED,
+        authenticated: !ADMIN_AUTH_ENABLED || Boolean(session),
+        username: session?.username || null,
+        csrfToken: session?.csrfToken || null,
+        secure: isRequestSecure(req),
+        requiresHttps: ADMIN_AUTH_ENABLED && !isRequestSecure(req)
+      },
+      { "cache-control": "no-store" }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/auth/login") {
+    if (!ADMIN_AUTH_ENABLED) {
+      sendJson(res, 404, { error: "Administrator authentication is not enabled." }, { "cache-control": "no-store" });
+      return;
+    }
+    if (!isRequestSecure(req)) {
+      sendJson(
+        res,
+        400,
+        { error: "Administrator login requires HTTPS." },
+        { "cache-control": "no-store" }
+      );
+      return;
+    }
+    if (!isSameOriginAdminRequest(req)) {
+      sendJson(res, 403, { error: "Cross-origin login requests are not allowed." }, { "cache-control": "no-store" });
+      return;
+    }
+
+    const body = await readJsonBody(req, 8192);
+    const username = clean(body.username).slice(0, 128);
+    const password = typeof body.password === "string" ? body.password.slice(0, 1024) : "";
+    const clientKey = `${clientAddress(req)}|${username.toLowerCase() || "unknown"}`;
+    const result = await adminAuth.authenticate(username, password, clientKey);
+    if (!result.ok) {
+      if (result.delayMs) await sleep(result.delayMs);
+      const rateLimited = result.reason === "rate-limited" || result.allowed === false;
+      sendJson(
+        res,
+        rateLimited ? 429 : 401,
+        { error: rateLimited ? "Too many login attempts. Try again later." : "Invalid username or password." },
+        {
+          "cache-control": "no-store",
+          ...(rateLimited ? { "retry-after": String(result.retryAfterSeconds || 60) } : {})
+        }
+      );
+      return;
+    }
+
+    sendJson(
+      res,
+      200,
+      {
+        authenticated: true,
+        username: result.session.username,
+        csrfToken: result.session.csrfToken,
+        expiresAt: new Date(result.session.expiresAt).toISOString()
+      },
+      {
+        "cache-control": "no-store",
+        "set-cookie": sessionCookie(result.token)
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/auth/logout") {
+    const session = requireAdminSession(req, res);
+    if (!session) return;
+    if (!authorizeAdminMutation(req, res, session)) return;
+    adminAuth.destroySession(cookieValue(req, ADMIN_COOKIE_NAME));
+    sendJson(
+      res,
+      200,
+      { authenticated: false },
+      { "cache-control": "no-store", "set-cookie": clearSessionCookie() }
+    );
+    return;
+  }
+
+  sendJson(res, 404, { error: "Not found." }, { "cache-control": "no-store" });
+}
+
+function requireAdminSession(req, res) {
+  if (!ADMIN_AUTH_ENABLED) return { authDisabled: true, username: null, csrfToken: null };
+  const session = adminSession(req);
+  if (session) return session;
+  sendJson(res, 401, { error: "Administrator authentication is required." }, { "cache-control": "no-store" });
+  return null;
+}
+
+function authorizeAdminMutation(req, res, session) {
+  if (!isSameOriginAdminRequest(req)) {
+    sendJson(res, 403, { error: "Cross-origin administration requests are not allowed." }, { "cache-control": "no-store" });
+    return false;
+  }
+  if (
+    ADMIN_AUTH_ENABLED &&
+    (!session?.csrfToken || clean(req.headers["x-csrf-token"]) !== session.csrfToken)
+  ) {
+    sendJson(res, 403, { error: "A valid CSRF token is required." }, { "cache-control": "no-store" });
+    return false;
+  }
+  return true;
+}
+
+function adminSession(req) {
+  return adminAuth.getSession(cookieValue(req, ADMIN_COOKIE_NAME));
+}
+
+function cookieValue(req, name) {
+  const header = String(req.headers.cookie || "");
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(separator + 1).trim());
+      } catch {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+function sessionCookie(token) {
+  const maxAge = Math.round(ADMIN_SESSION_TTL_MINUTES * 60);
+  return `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=Strict`;
+}
+
+function clearSessionCookie() {
+  return `${ADMIN_COOKIE_NAME}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict`;
+}
+
+function isRequestSecure(req) {
+  if (TLS_ENABLED || req.socket.encrypted) return true;
+  if (!ADMIN_TRUST_PROXY) return false;
+  return clean(req.headers["x-forwarded-proto"]).split(",")[0].toLowerCase() === "https";
+}
+
+function clientAddress(req) {
+  if (ADMIN_TRUST_PROXY) {
+    const forwarded = clean(req.headers["x-forwarded-for"]).split(",")[0];
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress || "unknown";
+}
+
+async function readJsonBody(req, maximumBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maximumBytes) {
+      const error = new Error("Request body is too large.");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("Request body must be valid JSON.");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function isSameOriginAdminRequest(req) {
@@ -942,17 +1180,41 @@ function sendEvent(client, event, payload) {
   client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function sendJson(res, statusCode, payload) {
+function sendJson(res, statusCode, payload, headers = {}) {
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-cache"
+    "cache-control": "no-cache",
+    ...securityHeaders(),
+    ...headers
   });
   res.end(JSON.stringify(payload));
 }
 
-function sendText(res, statusCode, text) {
-  res.writeHead(statusCode, { "content-type": "text/plain; charset=utf-8" });
+function sendText(res, statusCode, text, headers = {}) {
+  res.writeHead(statusCode, {
+    "content-type": "text/plain; charset=utf-8",
+    ...securityHeaders(),
+    ...headers
+  });
   res.end(text);
+}
+
+function redirect(res, location) {
+  res.writeHead(302, {
+    location,
+    "cache-control": "no-store",
+    ...securityHeaders()
+  });
+  res.end();
+}
+
+function securityHeaders() {
+  return {
+    "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  };
 }
 
 function recordError(error) {
@@ -965,6 +1227,7 @@ function recordError(error) {
 }
 
 function shutdown() {
+  adminAuth.clearSessions();
   storage.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();
@@ -976,6 +1239,19 @@ function parseApiKeys() {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function loadAdminPasswordHash() {
+  const configuredFile = clean(process.env.ADMIN_PASSWORD_HASH_FILE);
+  if (!configuredFile) return clean(process.env.ADMIN_PASSWORD_HASH);
+  const filePath = path.isAbsolute(configuredFile)
+    ? configuredFile
+    : path.resolve(ROOT_DIR, configuredFile);
+  try {
+    return fs.readFileSync(filePath, "utf8").trim();
+  } catch (error) {
+    throw new Error(`Unable to read ADMIN_PASSWORD_HASH_FILE: ${error.message}`);
+  }
 }
 
 function loadDotEnv(filePath) {

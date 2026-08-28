@@ -17,7 +17,9 @@ else
   echo "Created .env from $profile_file."
 fi
 
-mkdir -p data backups certs
+mkdir -p data backups certs secrets
 chmod 775 data backups
+chmod 700 secrets
+chown 1000:1000 secrets 2>/dev/null || true
 
 echo "Next: edit .env with your Ambient keys, then run docker compose up -d"

@@ -7,13 +7,17 @@
     <title>WS-2000 Administration</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=1.4.2">
+    <link rel="stylesheet" href="/styles.css?v=1.5.0">
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
         <div><p class="eyebrow">WS-2000</p><h1>Administration</h1></div>
-        <a class="text-link" href="/">Back to dashboard</a>
+        <div class="topbar-actions">
+          <span id="adminIdentity" class="muted"></span>
+          <button id="logoutBtn" class="icon-button" type="button" hidden>Sign out</button>
+          <a class="text-link" href="/">Back to dashboard</a>
+        </div>
       </header>
       <section id="adminGrid" class="admin-grid" aria-live="polite"></section>
       <section class="admin-panel wide">
@@ -40,6 +44,6 @@
         </details>
       </section>
     </main>
-    <script src="/admin.js?v=1.4.2" defer></script>
+    <script src="/admin.js?v=1.5.0" defer></script>
   </body>
 </html>

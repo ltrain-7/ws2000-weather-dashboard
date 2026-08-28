@@ -15,6 +15,7 @@ services:
       - ./data:/app/data
       - ./backups:/app/backups
       - ./certs:/app/certs:ro
+      - ./secrets:/app/secrets:ro
     mem_limit: "${CONTAINER_MEMORY_LIMIT:-256m}"
     stop_grace_period: 10s
     healthcheck:
