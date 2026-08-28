@@ -51,6 +51,16 @@ docker compose up -d --force-recreate
 
 Open the HTTPS hostname, choose **Administration**, and sign in. Direct access to `http://NAS-IP:3000` should no longer be possible when the loopback binding is active.
 
+Verify the proxy and authentication boundary before relying on it:
+
+```sh
+curl --fail https://weather.example.com/api/auth/status
+docker port ws2000-dashboard 3000/tcp
+curl --connect-timeout 3 http://NAS-IP:3000/api/health
+```
+
+The authentication response should report `"enabled":true`, `"secure":true`, and `"requiresHttps":false`. Docker should publish only `127.0.0.1:3000`, and the direct NAS-IP request should fail. A request to `https://weather.example.com/admin.html` should redirect to `/login.html` until a valid session exists.
+
 ## Raspberry Pi or Linux
 
 Choose one TLS pattern:
