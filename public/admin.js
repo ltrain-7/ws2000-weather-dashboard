@@ -7,13 +7,47 @@ const backfillBtn = document.getElementById("backfillBtn");
 const backfillDays = document.getElementById("backfillDays");
 const adminStationName = document.getElementById("adminStationName");
 const adminRawTable = document.getElementById("adminRawTable");
+const adminIdentity = document.getElementById("adminIdentity");
+const logoutBtn = document.getElementById("logoutBtn");
 let statusTimer = null;
+let csrfToken = "";
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  const ready = await initializeAuthentication();
+  if (!ready) return;
   bindActions();
   loadStatus();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 });
+
+async function initializeAuthentication() {
+  try {
+    const status = await fetchJson("/api/auth/status");
+    if (status.enabled && !status.authenticated) {
+      window.location.replace("/login.html?next=%2Fadmin.html");
+      return false;
+    }
+    csrfToken = status.csrfToken || "";
+    if (status.enabled) {
+      adminIdentity.textContent = status.username || "Administrator";
+      logoutBtn.hidden = false;
+      logoutBtn.addEventListener("click", logout);
+    }
+    return true;
+  } catch (error) {
+    adminMessage.textContent = error.message;
+    return false;
+  }
+}
+
+async function logout() {
+  logoutBtn.disabled = true;
+  try {
+    await fetchJson("/api/auth/logout", { method: "POST" });
+  } finally {
+    window.location.replace("/login.html");
+  }
+}
 
 function bindActions() {
   refreshAdmin.addEventListener("click", () => loadStatus());
@@ -117,8 +151,21 @@ function renderStatus(status) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, { headers: { accept: "application/json" }, ...options });
-  const data = await response.json();
+  const method = String(options.method || "GET").toUpperCase();
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      accept: "application/json",
+      ...(method !== "GET" && csrfToken ? { "x-csrf-token": csrfToken } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    window.location.replace("/login.html?next=%2Fadmin.html");
+    throw new Error("Administrator session expired.");
+  }
   if (!response.ok) throw new Error(data.detail || data.error || `Request failed: ${response.status}`);
   return data;
 }

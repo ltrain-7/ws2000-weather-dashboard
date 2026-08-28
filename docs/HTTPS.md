@@ -5,7 +5,7 @@ The dashboard supports two TLS patterns:
 - **Synology DSM (recommended):** DSM terminates HTTPS and proxies to the container over local HTTP.
 - **Raspberry Pi/Linux:** use Caddy as a TLS reverse proxy, or enable the app's native Node HTTPS support.
 
-HTTPS encrypts traffic but does not add authentication. The dashboard has no login screen. Keep it LAN-only, use a VPN, or put authentication in front of it before allowing internet access. Never forward host port `3000` from the router.
+HTTPS encrypts traffic but does not itself add authentication. The app supports an optional built-in administrator login; see [Administrator authentication](AUTHENTICATION.md). Keep the public dashboard LAN-only or use a VPN unless you deliberately protect the entire site. Never forward host port `3000` from the router.
 
 ## Synology DSM 7.2–7.4
 
@@ -36,6 +36,8 @@ Under **Custom Header**, choose **Create → WebSocket**. The dashboard currentl
 Assign the new certificate to the reverse-proxy hostname using **Control Panel → Security → Certificate → Settings** (the button may be named **Configure** on some DSM releases). Then open `https://weather.example.com` and verify that the browser shows the expected certificate.
 
 Keep port `3000` restricted to the LAN in the DSM firewall. If remote access is required, prefer a VPN. If using direct internet access, forward only TCP 443 to the NAS, protect the dashboard with authentication, and understand the certificate provider's renewal requirements before restricting port 80.
+
+For built-in administrator authentication, use the loopback binding shown below and set `ADMIN_TRUST_PROXY=true`. This allows secure session cookies only through the DSM HTTPS hostname and prevents clients from bypassing DSM through port 3000.
 
 DSM 8 has not yet been validated for this project. If its labels change, use the equivalent **reverse proxy** and **certificate assignment** screens; the source remains HTTPS on 443 and the destination remains HTTP on `127.0.0.1:3000`.
 

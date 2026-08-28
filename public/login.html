@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f8b8d">
+    <title>WS-2000 Administrator Login</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=1.5.0">
+  </head>
+  <body class="auth-page">
+    <main class="auth-shell">
+      <section class="auth-panel" aria-labelledby="loginTitle">
+        <div class="brand-block auth-brand">
+          <div class="brand-mark" aria-hidden="true"><span class="sun"></span><span class="rain"></span></div>
+          <div><p class="eyebrow">Ambient Weather</p><h1 id="loginTitle">Administrator login</h1></div>
+        </div>
+        <p class="muted">Sign in to manage history, backups, and station diagnostics.</p>
+        <form id="loginForm" class="auth-form">
+          <label>
+            <span class="control-label">Username</span>
+            <input id="username" name="username" type="text" autocomplete="username" maxlength="128" required autofocus>
+          </label>
+          <label>
+            <span class="control-label">Password</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+          </label>
+          <button id="loginButton" class="icon-button auth-submit" type="submit">Sign in</button>
+        </form>
+        <p id="loginMessage" class="message-box auth-message" role="alert" aria-live="polite"></p>
+        <a class="text-link" href="/">Back to weather dashboard</a>
+      </section>
+    </main>
+    <script src="/login.js?v=1.5.0" defer></script>
+  </body>
+</html>

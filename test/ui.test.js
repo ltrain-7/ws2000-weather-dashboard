@@ -15,6 +15,25 @@ test("dashboard keeps technical station fields in Administration", () => {
   assert.match(admin, /id="adminRawTable"/);
 });
 
+test("administrator login is accessible and authenticated actions carry CSRF protection", () => {
+  const dockerIgnore = read(".dockerignore");
+  const login = read("public/login.html");
+  const loginScript = read("public/login.js");
+  const adminScript = read("public/admin.js");
+  const worker = read("public/service-worker.js");
+
+  assert.match(login, /autocomplete="username"/);
+  assert.match(login, /autocomplete="current-password"/);
+  assert.match(loginScript, /\/api\/auth\/login/);
+  assert.match(adminScript, /x-csrf-token/);
+  assert.match(adminScript, /\/api\/auth\/logout/);
+  assert.match(worker, /startsWith\("\/api\/admin"\)/);
+  assert.match(worker, /startsWith\("\/api\/auth"\)/);
+  assert.doesNotMatch(worker.split("\n")[1], /admin|login/);
+  assert.match(dockerIgnore, /^certs$/m);
+  assert.match(dockerIgnore, /^secrets$/m);
+});
+
 test("dashboard controls retain accessible interaction states", () => {
   const dashboard = read("public/index.html");
   const script = read("public/app.js");
@@ -38,14 +57,17 @@ test("release version and service-worker assets stay synchronized", () => {
   const version = require(path.join(root, "package.json")).version;
   const dashboard = read("public/index.html");
   const admin = read("public/admin.html");
+  const login = read("public/login.html");
   const worker = read("public/service-worker.js");
 
   assert.match(dashboard, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(dashboard, new RegExp(`app\\.js\\?v=${version}`));
   assert.match(admin, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(admin, new RegExp(`admin\\.js\\?v=${version}`));
+  assert.match(login, new RegExp(`styles\\.css\\?v=${version}`));
+  assert.match(login, new RegExp(`login\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`ws2000-v${version}`));
   assert.match(worker, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(worker, new RegExp(`app\\.js\\?v=${version}`));
-  assert.match(worker, new RegExp(`admin\\.js\\?v=${version}`));
+  assert.doesNotMatch(worker, new RegExp(`(?:admin|login)\\.js\\?v=${version}`));
 });

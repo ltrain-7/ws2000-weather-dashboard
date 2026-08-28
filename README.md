@@ -2,7 +2,7 @@
 
 A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
 
-It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and a private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, and includes chart tooltips plus an accessible data table.
+It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and optional built-in authentication for its private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, and includes chart tooltips plus an accessible data table.
 
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
@@ -47,6 +47,7 @@ The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspber
 Open `/admin.html` to view application, connection, station, storage, backup, and backfill status. The page never returns Ambient API key values.
 
 For HTTPS on Synology DSM or Raspberry Pi/Linux, see [HTTPS and TLS setup](docs/HTTPS.md).
+To protect the administration page and every maintenance API with a secure login, see [Administrator authentication](docs/AUTHENTICATION.md).
 
 Check service health with:
 
@@ -73,7 +74,7 @@ These steps are validated for DSM 7.2–7.4 with **Container Manager** installed
 
    Create the Ambient keys at <https://ambientweather.net/account>. Do not put real keys in GitHub or screenshots.
 
-4. Create the persistent folders `data`, `backups`, and `certs` inside `/volume1/docker/ws2000-dashboard`. If created over SSH as root, run `chown -R 1000:1000 data backups` from the project folder so the container can write data and verified backups.
+4. Create the persistent folders `data`, `backups`, `certs`, and `secrets` inside `/volume1/docker/ws2000-dashboard`. If created over SSH as root, run `chown -R 1000:1000 data backups secrets` from the project folder so the container can write data and read an optional administrator hash file. Keep `secrets` private with `chmod 700 secrets`.
 5. In **Container Manager → Project → Create**, choose:
 
    - Project name: `ws2000-dashboard`
@@ -90,8 +91,9 @@ If SSH is enabled, run these commands as an administrator with root privileges. 
 ```sh
 cd /volume1/docker/ws2000-dashboard
 cp .env.example .env
-mkdir -p data backups certs
-chown -R 1000:1000 data backups
+mkdir -p data backups certs secrets
+chown -R 1000:1000 data backups secrets
+chmod 700 secrets
 chmod 600 .env
 # Edit .env and add the two Ambient keys before continuing.
 /usr/local/bin/docker compose up -d
@@ -210,6 +212,12 @@ docker compose up -d
 | `BACKUP_INTERVAL_HOURS` | Hours between verified SQLite backups; `0` disables scheduling |
 | `BACKUP_RETENTION_DAYS` | Maximum age of application-created backups; `0` disables age pruning |
 | `BACKUP_MAX_FILES` | Maximum application-created backups retained; `0` disables count pruning |
+| `ADMIN_AUTH_ENABLED` | Protects the administration page and APIs; defaults to `false` |
+| `ADMIN_USERNAME` | Administrator username; defaults to `admin` |
+| `ADMIN_PASSWORD_HASH` | Quoted scrypt hash produced by `npm run auth:hash` |
+| `ADMIN_PASSWORD_HASH_FILE` | Optional read-only hash file, such as `/app/secrets/admin-password.hash` |
+| `ADMIN_SESSION_TTL_MINUTES` | Administrator session lifetime; defaults to 480 minutes |
+| `ADMIN_TRUST_PROXY` | Trusts a local reverse proxy's HTTPS header; use only with a loopback port binding |
 | `TLS_ENABLED` | Enables native Node HTTPS; defaults to `false` |
 | `TLS_CERT_PATH` | Certificate chain inside the container; defaults to `/app/certs/fullchain.pem` |
 | `TLS_KEY_PATH` | Private key inside the container; defaults to `/app/certs/privkey.pem` |
@@ -264,9 +272,9 @@ The database survives updates and rebuilds because it lives in the host `data` d
 
 - Keep `.env` private; never email or commit it.
 - The browser never receives the Ambient keys.
-- This dashboard has no login screen. Use it on a trusted home network.
-- Do not expose port 3000 directly to the public internet. Use an authenticated reverse proxy or VPN if remote access is required.
-- HTTPS encrypts traffic but does not add login protection. Use a VPN, an authenticated proxy, or a LAN-only firewall rule.
+- Built-in authentication can protect the administration page and maintenance APIs; it is disabled by default for upgrade compatibility. See [Administrator authentication](docs/AUTHENTICATION.md).
+- Do not expose port 3000 directly to the public internet. Bind it to loopback behind DSM/Caddy or use a trusted LAN firewall rule.
+- HTTPS protects credentials and session cookies in transit. Authentication does not make the public weather dashboard private; use a VPN or proxy-wide authentication if the whole site must be restricted.
 - Docker logs are rotated to protect small SD cards from unbounded log growth.
 - CI smoke-tests the published `amd64`, `arm64`, and `arm/v7` images under emulation. This improves Raspberry Pi confidence but does not replace validation on every physical Pi model and OS image.
 
