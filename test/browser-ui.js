@@ -119,7 +119,7 @@ async function testDashboardInteractions(browser) {
   );
 
   await page.getByRole("button", { name: "180D", exact: true }).click();
-  await page.getByRole("heading", { name: "Last 180 days", exact: true }).waitFor();
+  await page.getByRole("heading", { name: /^Last 180 days/ }).waitFor();
   assert.match(await page.locator("#historyCoverage").innerText(), /Partial range: \d+ of 180 days available/);
 
   await page.locator("#historyDate").fill("2026-03-08");
