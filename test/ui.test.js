@@ -38,10 +38,13 @@ test("dashboard controls retain accessible interaction states", () => {
   const dashboard = read("public/index.html");
   const script = read("public/app.js");
   const styles = read("public/styles.css");
+  const worker = read("public/service-worker.js");
 
   assert.match(dashboard, /role="tablist" aria-label="Chart metric"/);
   assert.match(dashboard, /aria-pressed="true" data-range-days="0"/);
   assert.match(dashboard, /data-range-days="1">1D<\/button>/);
+  assert.match(dashboard, /id="historyCoverage"/);
+  assert.match(dashboard, /id="updateBanner"/);
   assert.match(dashboard, /aria-describedby="chartSummary chartMessage"/);
   assert.match(dashboard, /id="chartDataTable"/);
   assert.match(script, /addEventListener\("keydown"/);
@@ -50,6 +53,10 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(script, /shortDesktopConditionsOpen/);
   assert.match(script, /\["High temp", current\.maximumTempf/);
   assert.match(script, /\["Low temp", current\.minimumTempf/);
+  assert.match(script, /updateViaCache: "none"/);
+  assert.match(script, /Partial range:/);
+  assert.match(script, /zonedTimeToUtc/);
+  assert.match(worker, /event\.request\.mode === "navigate"/);
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
   assert.match(styles, /min-height:\s*180px/);

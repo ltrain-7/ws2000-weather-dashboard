@@ -211,6 +211,7 @@ docker compose up -d
 | `AMBIENT_API_KEYS` | Optional comma-separated user keys |
 | `AMBIENT_DEVICE_MAC` | Optional station MAC to select by default |
 | `TZ` | Container timezone, such as `America/New_York` |
+| `STATION_TIMEZONE` | IANA timezone used for station calendar days, rainfall, and date-picker ranges; defaults to `TZ` |
 | `DASHBOARD_PORT` | Host port; defaults to `3000` |
 | `WS2000_IMAGE` | Published container image; defaults to the `stable` GHCR release |
 | `AMBIENT_POLL_INTERVAL_MS` | REST fallback interval; minimum 30 seconds |

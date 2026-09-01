@@ -137,6 +137,15 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install browser-test dependencies
+        run: npm ci --ignore-scripts
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -154,18 +163,23 @@ jobs:
         run: |
           set -euo pipefail
           container=ws2000-pr-smoke
-          docker run -d --name "$container" ws2000-dashboard:pull-request
+          docker run -d --name "$container" -p 127.0.0.1:3100:3000 ws2000-dashboard:pull-request
           trap 'docker logs "$container"; docker rm -f "$container"' EXIT
+          healthy=false
           for attempt in {1..30}; do
             if docker exec "$container" \
               node -e "Promise.all(['/api/health','/api/admin','/manifest.webmanifest'].map(p=>fetch('http://127.0.0.1:3000'+p).then(r=>{if(!r.ok)throw Error(p)}))).then(()=>process.exit(0)).catch(()=>process.exit(1))"; then
-              exit 0
+              healthy=true
+              break
             fi
             status="$(docker inspect --format '{{.State.Status}}' "$container")"
             [[ "$status" == exited ]] && exit 1
             sleep 3
           done
-          exit 1
+          [[ "$healthy" == true ]]
+          BROWSER_TEST_BASE_URL=http://127.0.0.1:3100 \
+            CHROME_PATH="$(command -v google-chrome)" \
+            npm run test:browser
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

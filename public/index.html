@@ -9,7 +9,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <link rel="stylesheet" href="/styles.css?v=1.6.0">
+    <link rel="stylesheet" href="/styles.css?v=1.7.0">
   </head>
   <body>
     <main class="app-shell">
@@ -47,6 +47,11 @@
       <section id="setupBanner" class="setup-banner" hidden>
         <strong>Keys needed.</strong>
         <span>Set AMBIENT_APPLICATION_KEY and AMBIENT_API_KEY in the server .env file.</span>
+      </section>
+
+      <section id="updateBanner" class="update-banner" role="status" hidden>
+        <div><strong>Update ready.</strong><span>A newer dashboard version is available.</span></div>
+        <button id="reloadUpdate" class="icon-button" type="button">Reload now</button>
       </section>
 
       <section class="current-conditions" aria-labelledby="currentConditionsTitle">
@@ -100,6 +105,7 @@
               <button class="range-button" type="button" aria-pressed="false" data-range-days="90">90D</button>
               <button class="range-button" type="button" aria-pressed="false" data-range-days="180">180D</button>
             </div>
+            <p id="historyCoverage" class="history-coverage" aria-live="polite">Checking stored history…</p>
           </div>
           <details id="historyOptions" class="history-options" open>
             <summary>Options</summary>
@@ -149,6 +155,6 @@
         </article>
       </section>
     </main>
-    <script src="/app.js?v=1.6.0" defer></script>
+    <script src="/app.js?v=1.7.0" defer></script>
   </body>
 </html>

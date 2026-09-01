@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ready) return;
   bindActions();
   loadStatus();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js", { updateViaCache: "none" }).then((registration) => registration.update()).catch(() => {});
 });
 
 async function initializeAuthentication() {
