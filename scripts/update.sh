@@ -51,6 +51,8 @@ old_image_id="$($docker_bin inspect --format '{{.Image}}' ws2000-dashboard 2>/de
 echo "Checking $image for an update."
 $docker_bin compose pull ws2000-dashboard
 new_image_id="$($docker_bin image inspect --format '{{.Id}}' "$image")"
+new_image_digest="$($docker_bin image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' "$image")"
+new_revision="$($docker_bin image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" 2>/dev/null || true)"
 
 if [ -n "$old_image_id" ] && [ "$old_image_id" = "$new_image_id" ]; then
   prune_backups
@@ -80,6 +82,14 @@ if $docker_bin compose up -d --force-recreate ws2000-dashboard; then
 fi
 
 if [ "$healthy" = true ]; then
+  deployment_file="$project_dir/data/deployment.json"
+  deployment_tmp="$project_dir/data/deployment.json.tmp"
+  deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"image":"%s","digest":"%s","revision":"%s","updatedAt":"%s"}\n' \
+    "$image" "$new_image_digest" "$new_revision" "$deployed_at" > "$deployment_tmp"
+  chmod 664 "$deployment_tmp"
+  chown 1000:1000 "$deployment_tmp" 2>/dev/null || true
+  mv "$deployment_tmp" "$deployment_file"
   prune_backups
   echo "Update succeeded and passed its health check."
   exit 0

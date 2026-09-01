@@ -44,6 +44,8 @@ test("analytics aggregate rainfall by local day and create a verified backup", (
   );
   assert.equal(analytics.readingCount, 3);
   assert.equal(analytics.maximumGustMph, 18);
+  assert.equal(analytics.minimumTempAt, "2026-08-23T12:00:00.000Z");
+  assert.equal(analytics.maximumTempAt, "2026-08-24T12:00:00.000Z");
   assert.ok(Math.abs(analytics.rainfallTotalIn - 0.55) < 0.0001);
   assert.deepEqual(analytics.wettestDay, { day: "2026-08-23", rainIn: 0.35 });
   assert.deepEqual(store.integrityCheck(), { ok: true, result: "ok" });
@@ -67,6 +69,8 @@ test("empty analytics preserve missing values instead of reporting false zeroes"
   const analytics = store.getAnalytics("missing", Date.now() - 86400000, Date.now());
   assert.equal(analytics.readingCount, 0);
   assert.equal(analytics.averageTempf, null);
+  assert.equal(analytics.minimumTempAt, null);
+  assert.equal(analytics.maximumTempAt, null);
   assert.equal(analytics.rainfallTotalIn, 0);
   assert.equal(analytics.wettestDay, null);
 });

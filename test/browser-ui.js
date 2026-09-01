@@ -86,6 +86,8 @@ async function testDashboardInteractions(browser) {
           averageTempf: 75,
           minimumTempf: 61,
           maximumTempf: 88,
+          minimumTempAt: new Date(now - 18 * 60 * 60 * 1000).toISOString(),
+          maximumTempAt: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
           averageHumidity: 55,
           maximumGustMph: 12,
           rainfallTotalIn: 0.2
@@ -112,6 +114,7 @@ async function testDashboardInteractions(browser) {
   const summary = await page.locator("#summaryGrid").innerText();
   assert.match(summary, /High temp\s*88(?:\.0)?°F/i);
   assert.match(summary, /Low temp\s*61(?:\.0)?°F/i);
+  assert.match(summary, /Observed\s+[A-Z][a-z]{2}\s+\d{1,2}/);
   assert.ok(lastHistoryRequest, "The 1D control should request stored history.");
   assert.equal(
     Date.parse(lastHistoryRequest.searchParams.get("endDate")) - Date.parse(lastHistoryRequest.searchParams.get("startDate")),

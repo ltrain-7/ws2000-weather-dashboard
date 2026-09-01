@@ -27,6 +27,9 @@ test("administrator login is accessible and authenticated actions carry CSRF pro
   assert.match(loginScript, /\/api\/auth\/login/);
   assert.match(adminScript, /x-csrf-token/);
   assert.match(adminScript, /\/api\/auth\/logout/);
+  assert.match(adminScript, /Container image/);
+  assert.match(adminScript, /Last deployment/);
+  assert.match(adminScript, /Deployment backup/);
   assert.match(worker, /startsWith\("\/api\/admin"\)/);
   assert.match(worker, /startsWith\("\/api\/auth"\)/);
   assert.doesNotMatch(worker.split("\n")[1], /admin|login/);
@@ -37,6 +40,8 @@ test("administrator login is accessible and authenticated actions carry CSRF pro
 test("dashboard controls retain accessible interaction states", () => {
   const dashboard = read("public/index.html");
   const script = read("public/app.js");
+  const historyTime = read("public/history-time.js");
+  const insights = read("public/insights.js");
   const styles = read("public/styles.css");
   const worker = read("public/service-worker.js");
 
@@ -51,11 +56,12 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(script, /setAttribute\("aria-selected"/);
   assert.match(script, /max-height: 900px/);
   assert.match(script, /shortDesktopConditionsOpen/);
-  assert.match(script, /\["High temp", current\.maximumTempf/);
-  assert.match(script, /\["Low temp", current\.minimumTempf/);
+  assert.match(insights, /\["High temp", current\.maximumTempf/);
+  assert.match(insights, /\["Low temp", current\.minimumTempf/);
+  assert.match(insights, /Observed/);
   assert.match(script, /updateViaCache: "none"/);
   assert.match(script, /Partial range:/);
-  assert.match(script, /zonedTimeToUtc/);
+  assert.match(historyTime, /zonedTimeToUtc/);
   assert.match(worker, /event\.request\.mode === "navigate"/);
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
@@ -71,6 +77,8 @@ test("release version and service-worker assets stay synchronized", () => {
   const worker = read("public/service-worker.js");
 
   assert.match(dashboard, new RegExp(`styles\\.css\\?v=${version}`));
+  assert.match(dashboard, new RegExp(`history-time\\.js\\?v=${version}`));
+  assert.match(dashboard, new RegExp(`insights\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`app\\.js\\?v=${version}`));
   assert.match(admin, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(admin, new RegExp(`admin\\.js\\?v=${version}`));
@@ -78,6 +86,13 @@ test("release version and service-worker assets stay synchronized", () => {
   assert.match(login, new RegExp(`login\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`ws2000-v${version}`));
   assert.match(worker, new RegExp(`styles\\.css\\?v=${version}`));
+  assert.match(worker, new RegExp(`history-time\\.js\\?v=${version}`));
+  assert.match(worker, new RegExp(`insights\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`app\\.js\\?v=${version}`));
   assert.doesNotMatch(worker, new RegExp(`(?:admin|login)\\.js\\?v=${version}`));
+});
+
+test("compose reports its configured image to Administration", () => {
+  const compose = read("docker-compose.yml");
+  assert.match(compose, /APP_IMAGE:.*WS2000_IMAGE/);
 });

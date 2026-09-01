@@ -115,6 +115,10 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   const unauthorizedApi = await request(port, { path: "/api/admin" });
   assert.equal(unauthorizedApi.statusCode, 401);
   assert.equal(unauthorizedApi.headers["cache-control"], "no-store");
+  assert.match(unauthorizedApi.headers["content-security-policy"], /form-action 'self'/);
+  assert.match(unauthorizedApi.headers["permissions-policy"], /camera=\(\)/);
+  assert.equal(unauthorizedApi.headers["cross-origin-opener-policy"], "same-origin");
+  assert.equal(unauthorizedApi.headers["strict-transport-security"], "max-age=31536000");
 
   const unauthorizedPage = await request(port, { path: "/admin.html" });
   assert.equal(unauthorizedPage.statusCode, 302);

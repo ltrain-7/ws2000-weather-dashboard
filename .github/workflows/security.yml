@@ -28,7 +28,7 @@ jobs:
       - name: Run application tests
         run: npm test
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
   codeql:
     runs-on: ubuntu-latest

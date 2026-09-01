@@ -1,9 +1,10 @@
 const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
-const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { AdminAuth } = require("./auth");
+const { createDeploymentStatus } = require("./deployment-status");
+const { createHttpResponder } = require("./http-response");
 const { createWeatherStore } = require("./storage");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -53,6 +54,10 @@ const BACKUP_MAX_FILES = clamp(numberFromEnv("BACKUP_MAX_FILES", 12), 0, 1000);
 const STATION_STALE_MINUTES = clamp(numberFromEnv("STATION_STALE_MINUTES", 15), 2, 1440);
 const ADMIN_COOKIE_NAME = "__Host-weather_session";
 const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
+const { redirect, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
+  publicDir: PUBLIC_DIR,
+  strictTransport: TLS_ENABLED || ADMIN_TRUST_PROXY
+});
 
 if (ADMIN_AUTH_ENABLED && !ADMIN_PASSWORD_HASH) {
   throw new Error(
@@ -76,6 +81,13 @@ const liveHistoryByMac = new Map();
 const storage = createWeatherStore({
   dbPath: SQLITE_DB_PATH,
   retentionDays: HISTORY_RETENTION_DAYS
+});
+const deploymentStatus = createDeploymentStatus({
+  backupDir: BACKUP_DIR,
+  metadataPath: clean(process.env.DEPLOYMENT_STATUS_PATH)
+    || path.join(path.dirname(SQLITE_DB_PATH), "deployment.json"),
+  packageInfo: PACKAGE,
+  startedAt: STARTED_AT
 });
 
 const state = {
@@ -108,17 +120,6 @@ const state = {
     completedAt: null
   }
 };
-
-const mimeTypes = new Map([
-  [".css", "text/css; charset=utf-8"],
-  [".html", "text/html; charset=utf-8"],
-  [".ico", "image/x-icon"],
-  [".js", "text/javascript; charset=utf-8"],
-  [".json", "application/json; charset=utf-8"],
-  [".svg", "image/svg+xml; charset=utf-8"],
-  [".txt", "text/plain; charset=utf-8"],
-  [".webmanifest", "application/manifest+json; charset=utf-8"]
-]);
 
 const requestHandler = async (req, res) => {
   try {
@@ -400,47 +401,6 @@ async function handleHistory(res, requestUrl) {
       fallback: liveHistoryFor(macAddress)
     });
   }
-}
-
-async function serveStatic(requestUrl, res) {
-  const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
-  let decodedPath;
-
-  try {
-    decodedPath = decodeURIComponent(requestPath);
-  } catch {
-    sendText(res, 400, "Bad request.");
-    return;
-  }
-
-  const filePath = path.normalize(path.join(PUBLIC_DIR, decodedPath));
-  const relativePath = path.relative(PUBLIC_DIR, filePath);
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    sendText(res, 403, "Forbidden.");
-    return;
-  }
-
-  let stats;
-  try {
-    stats = await fsp.stat(filePath);
-  } catch {
-    sendText(res, 404, "Not found.");
-    return;
-  }
-
-  if (!stats.isFile()) {
-    sendText(res, 404, "Not found.");
-    return;
-  }
-
-  const contentType = mimeTypes.get(path.extname(filePath)) || "application/octet-stream";
-  const sensitiveAsset = ["/admin.html", "/admin.js", "/login.html", "/login.js"].includes(decodedPath);
-  res.writeHead(200, {
-    "content-type": contentType,
-    "cache-control": sensitiveAsset ? "no-store" : "no-cache, must-revalidate",
-    ...securityHeaders()
-  });
-  fs.createReadStream(filePath).pipe(res);
 }
 
 async function refreshDevices(reason) {
@@ -773,10 +733,12 @@ function analyticsResponse(requestUrl) {
 }
 
 function adminStatus() {
+  const deployment = deploymentStatus.status();
   return {
     application: {
       name: PACKAGE.name,
       version: PACKAGE.version,
+      revision: deployment.revision,
       nodeVersion: process.version,
       stationTimezone: STATION_TIMEZONE,
       startedAt: STARTED_AT,
@@ -784,6 +746,7 @@ function adminStatus() {
       tlsEnabled: TLS_ENABLED,
       adminAuthEnabled: ADMIN_AUTH_ENABLED
     },
+    deployment,
     configured,
     connections: { rest: state.rest, realtime: state.realtime },
     stationHealth: stationHealth(),
@@ -793,7 +756,7 @@ function adminStatus() {
       intervalHours: BACKUP_INTERVAL_HOURS,
       retentionDays: BACKUP_RETENTION_DAYS,
       maxFiles: BACKUP_MAX_FILES,
-      files: listBackups(),
+      files: deploymentStatus.listBackups(),
       state: state.backup
     },
     backfill: state.backfill,
@@ -1001,7 +964,7 @@ async function runBackup(reason) {
   try {
     const stamp = new Date().toISOString().replaceAll(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
     const result = storage.createBackup(path.join(BACKUP_DIR, `weather-${stamp}.db`));
-    pruneBackupFiles();
+    deploymentStatus.pruneBackups(BACKUP_RETENTION_DAYS, BACKUP_MAX_FILES);
     state.backup.lastResult = { ...result, path: undefined, reason };
     return { accepted: true, backup: state.backup.lastResult };
   } catch (error) {
@@ -1010,30 +973,6 @@ async function runBackup(reason) {
   } finally {
     state.backup.running = false;
   }
-}
-
-function listBackups() {
-  try {
-    return fs.readdirSync(BACKUP_DIR)
-      .filter((name) => /^weather-.*\.db$/.test(name))
-      .map((name) => {
-        const stats = fs.statSync(path.join(BACKUP_DIR, name));
-        return { filename: name, bytes: stats.size, createdAt: stats.mtime.toISOString() };
-      })
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  } catch {
-    return [];
-  }
-}
-
-function pruneBackupFiles() {
-  const now = Date.now();
-  const files = listBackups();
-  files.forEach((file, index) => {
-    const tooOld = BACKUP_RETENTION_DAYS > 0 && now - Date.parse(file.createdAt) > BACKUP_RETENTION_DAYS * 86400000;
-    const tooMany = BACKUP_MAX_FILES > 0 && index >= BACKUP_MAX_FILES;
-    if (tooOld || tooMany) fs.unlinkSync(path.join(BACKUP_DIR, file.filename));
-  });
 }
 
 async function runBackfill(macAddress, days) {
@@ -1157,7 +1096,8 @@ function openEventStream(req, res) {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
-    "x-accel-buffering": "no"
+    "x-accel-buffering": "no",
+    ...securityHeaders()
   });
   res.write(": connected\n\n");
 
@@ -1184,43 +1124,6 @@ function broadcast(event, payload) {
 function sendEvent(client, event, payload) {
   client.res.write(`event: ${event}\n`);
   client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
-}
-
-function sendJson(res, statusCode, payload, headers = {}) {
-  res.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-cache",
-    ...securityHeaders(),
-    ...headers
-  });
-  res.end(JSON.stringify(payload));
-}
-
-function sendText(res, statusCode, text, headers = {}) {
-  res.writeHead(statusCode, {
-    "content-type": "text/plain; charset=utf-8",
-    ...securityHeaders(),
-    ...headers
-  });
-  res.end(text);
-}
-
-function redirect(res, location) {
-  res.writeHead(302, {
-    location,
-    "cache-control": "no-store",
-    ...securityHeaders()
-  });
-  res.end();
-}
-
-function securityHeaders() {
-  return {
-    "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-  };
 }
 
 function recordError(error) {

@@ -1,0 +1,7 @@
+{
+  "name": "parseuri",
+  "version": "2.0.0",
+  "description": "Bounded WHATWG URL adapter for the Socket.IO 2 client.",
+  "main": "index.js",
+  "license": "MIT"
+}
