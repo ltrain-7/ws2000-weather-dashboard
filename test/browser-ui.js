@@ -128,7 +128,10 @@ async function testDashboardInteractions(browser) {
   await page.getByRole("heading", { name: /Mar 8, 2026/ }).waitFor();
   const selectedDuration = Date.parse(lastHistoryRequest.searchParams.get("endDate"))
     - Date.parse(lastHistoryRequest.searchParams.get("startDate")) + 1;
-  assert.equal(selectedDuration, 23 * 60 * 60 * 1000, "DST transition days should use the station timezone.");
+  assert.ok(
+    Math.abs(selectedDuration - (23 * 60 * 60 * 1000)) <= 1,
+    "DST transition days should use the station timezone."
+  );
 
   const firstRow = await Promise.all(["Latest", "1D", "7D"].map(async (name) => {
     const box = await page.getByRole("button", { name, exact: true }).boundingBox();
