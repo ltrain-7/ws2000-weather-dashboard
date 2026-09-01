@@ -389,7 +389,7 @@ function drawChart() {
   const rangeTitle = state.historyDate
     ? formatSelectedDate(state.historyDate)
     : state.historyRangeDays
-      ? `Last ${state.historyRangeDays} days`
+      ? rangeLabel(state.historyRangeDays)
       : "Latest readings";
   els.chartTitle.textContent = `${rangeTitle}${trendMethodLabel()}`;
   canvas.setAttribute("aria-label", `${metric.label} history chart: ${els.chartTitle.textContent}`);
@@ -765,9 +765,11 @@ function renderInsights() {
   }
   const current = state.historyDate ? summarizeHistory(state.history) : analytics.current;
   const previous = state.historyDate ? summarizeHistory(state.comparisonHistory) : analytics.previous;
-  els.comparisonTitle.textContent = state.historyDate ? `${formatSelectedDate(state.historyDate)} vs previous day` : state.historyRangeDays ? `Last ${state.historyRangeDays} days vs previous` : "Last 24 hours vs previous";
+  els.comparisonTitle.textContent = state.historyDate ? `${formatSelectedDate(state.historyDate)} vs previous day` : state.historyRangeDays ? `${rangeLabel(state.historyRangeDays)} vs previous` : "Last 24 hours vs previous";
   const comparisons = [
     ["Average temp", current.averageTempf, previous?.averageTempf, "°F"],
+    ["High temp", current.maximumTempf, previous?.maximumTempf, "°F"],
+    ["Low temp", current.minimumTempf, previous?.minimumTempf, "°F"],
     ["Average humidity", current.averageHumidity, previous?.averageHumidity, "%"],
     ["Peak gust", current.maximumGustMph, previous?.maximumGustMph, "mph"],
     ["Rainfall", current.rainfallTotalIn, previous?.rainfallTotalIn, "in"]
@@ -791,8 +793,11 @@ function summarizeHistory(history) {
   const average = (items) => items.length ? items.reduce((sum, value) => sum + value, 0) / items.length : null;
   const maximum = (items) => items.length ? Math.max(...items) : null;
   const rain = values("dailyrainin");
+  const temperatures = values("tempf");
   return {
-    averageTempf: average(values("tempf")),
+    averageTempf: average(temperatures),
+    minimumTempf: temperatures.length ? Math.min(...temperatures) : null,
+    maximumTempf: maximum(temperatures),
     averageHumidity: average(values("humidity")),
     maximumGustMph: maximum(values("windgustmph")),
     rainfallTotalIn: maximum(rain)
@@ -990,6 +995,10 @@ function rollingDateRange(days) {
   const end = new Date();
   const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
   return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function rangeLabel(days) {
+  return Number(days) === 1 ? "Last 1 day" : `Last ${days} days`;
 }
 
 function previousDateRange(range) {

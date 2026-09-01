@@ -374,7 +374,7 @@ h2 { font-size: 1.08rem; }
 .insights-section { margin-bottom: 16px; padding: 18px; }
 .insight-panel { padding-top: 4px; }
 .section-heading { justify-content: space-between; margin-bottom: 12px; }
-.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .stat-card { padding: 12px; border-radius: 8px; background: var(--panel-soft); }
 .stat-card span, .admin-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.72rem; font-weight: 850; text-transform: uppercase; }
 .stat-card strong { display: block; }
@@ -476,7 +476,7 @@ tr:last-child td { border-bottom: 0; }
 
   .history-filters { align-items: stretch; flex-direction: column; gap: 12px; padding: 10px; }
   .history-range-group { flex-basis: auto; width: 100%; }
-  .range-presets { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+  .range-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
   .range-button { min-width: 0; min-height: 44px; padding: 0 4px; }
   .history-options { width: 100%; }
   .history-options > summary { display: flex; align-items: center; }
