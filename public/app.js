@@ -24,6 +24,8 @@ const els = {
   statusPill: document.getElementById("statusPill"),
   updatedAt: document.getElementById("updatedAt"),
   setupBanner: document.getElementById("setupBanner"),
+  updateBanner: document.getElementById("updateBanner"),
+  reloadUpdate: document.getElementById("reloadUpdate"),
   healthBanner: document.getElementById("healthBanner"),
   healthTitle: document.getElementById("healthTitle"),
   healthDetail: document.getElementById("healthDetail"),
@@ -48,6 +50,7 @@ const els = {
   chartTitle: document.getElementById("chartTitle"),
   historyOptions: document.getElementById("historyOptions"),
   historyDate: document.getElementById("historyDate"),
+  historyCoverage: document.getElementById("historyCoverage"),
   comparePrevious: document.getElementById("comparePrevious"),
   historyChart: document.getElementById("historyChart"),
   chartTooltip: document.getElementById("chartTooltip"),
@@ -76,10 +79,11 @@ async function init() {
   setInsightTab(state.insightTab);
   configureResponsiveDisclosures();
   els.comparePrevious.checked = state.comparePrevious;
-  els.historyDate.max = toDateInputValue(new Date());
+  els.reloadUpdate.addEventListener("click", () => window.location.reload());
 
   try {
     state.config = await fetchJson("/api/config");
+    els.historyDate.max = toDateInputValue(new Date(), state.config.stationTimezone);
     els.setupBanner.hidden = Boolean(state.config.configured);
     const latest = await fetchJson("/api/latest");
     applyState(latest);
@@ -272,6 +276,7 @@ async function loadHistory() {
   } finally {
     state.historyLoading = false;
   }
+  setRangeButtons();
   drawChart();
   renderInsights();
 }
@@ -565,6 +570,10 @@ function setMetricButtons() {
 }
 
 function setRangeButtons() {
+  const firstReadingAt = Date.parse(state.analytics?.coverage?.firstReadingAt || "");
+  const availableDays = Number.isFinite(firstReadingAt)
+    ? Math.max(1, Math.ceil((Date.now() - firstReadingAt) / 86400000))
+    : 0;
   document.querySelectorAll("[data-range-days]").forEach((button) => {
     const days = Number(button.dataset.rangeDays) || 0;
     button.classList.toggle(
@@ -572,7 +581,25 @@ function setRangeButtons() {
       !state.historyDate && days === state.historyRangeDays
     );
     button.setAttribute("aria-pressed", String(!state.historyDate && days === state.historyRangeDays));
+    const partial = days > 0 && availableDays > 0 && availableDays < days;
+    button.classList.toggle("partial", partial);
+    if (partial) button.title = `${availableDays} days of stored data are currently available`;
+    else button.removeAttribute("title");
   });
+  renderHistoryCoverage(firstReadingAt, availableDays);
+}
+
+function renderHistoryCoverage(firstReadingAt, availableDays) {
+  if (!Number.isFinite(firstReadingAt)) {
+    els.historyCoverage.textContent = "Stored history will appear after the first saved reading.";
+    return;
+  }
+  const since = formatTimestampDate(firstReadingAt);
+  if (state.historyRangeDays > 0 && availableDays < state.historyRangeDays) {
+    els.historyCoverage.textContent = `Partial range: ${availableDays} of ${state.historyRangeDays} days available since ${since}.`;
+    return;
+  }
+  els.historyCoverage.textContent = `Data available since ${since}. 1D is a rolling 24-hour period.`;
 }
 
 function setInsightTab(value) {
@@ -948,6 +975,7 @@ function formatTime(value) {
   const date = new Date(Number(value));
   if (Number.isNaN(date.getTime())) return "--";
   return new Intl.DateTimeFormat([], {
+    timeZone: state.config?.stationTimezone,
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -984,10 +1012,47 @@ function formatMetricValue(metric, value) {
 
 function historyDateRange(value) {
   if (!value) return null;
-  const start = new Date(`${value}T00:00:00`);
-  const end = new Date(`${value}T23:59:59.999`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-  return { start: start.toISOString(), end: end.toISOString() };
+  const [year, month, day] = value.split("-").map(Number);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  const timezone = state.config?.stationTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const start = zonedTimeToUtc(year, month, day, timezone);
+  const following = new Date(Date.UTC(year, month - 1, day + 1));
+  const end = zonedTimeToUtc(
+    following.getUTCFullYear(),
+    following.getUTCMonth() + 1,
+    following.getUTCDate(),
+    timezone
+  ) - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
+}
+
+function zonedTimeToUtc(year, month, day, timezone) {
+  const desired = Date.UTC(year, month - 1, day, 0, 0, 0);
+  let candidate = desired;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(new Date(candidate));
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const represented = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second)
+    );
+    candidate += desired - represented;
+  }
+  return candidate;
 }
 
 function rollingDateRange(days) {
@@ -1013,15 +1078,34 @@ function previousDateRange(range) {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.register("/service-worker.js", { updateViaCache: "none" }).then((registration) => {
+      registration.update().catch(() => {});
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hadController) els.updateBanner.hidden = false;
+      }, { once: true });
+    }).catch(() => {});
   }
 }
 
-function toDateInputValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function toDateInputValue(date, timezone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatTimestampDate(value) {
+  return new Intl.DateTimeFormat([], {
+    timeZone: state.config?.stationTimezone,
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(Number(value)));
 }
 
 function formatSelectedDate(value) {

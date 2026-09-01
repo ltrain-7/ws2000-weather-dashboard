@@ -13,6 +13,8 @@ const STARTED_AT = new Date().toISOString();
 
 loadDotEnv(path.join(ROOT_DIR, ".env"));
 
+const STATION_TIMEZONE = timezoneFromEnv();
+process.env.TZ = STATION_TIMEZONE;
 const PORT = numberFromEnv("PORT", 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const TLS_ENABLED = booleanFromEnv("TLS_ENABLED", false);
@@ -246,6 +248,7 @@ async function handleApi(req, res, requestUrl) {
       historyMaxPoints: HISTORY_MAX_POINTS,
       liveHistoryLimit: LIVE_HISTORY_LIMIT,
       historyRetentionDays: HISTORY_RETENTION_DAYS,
+      stationTimezone: STATION_TIMEZONE,
       tlsEnabled: TLS_ENABLED,
       adminAuthEnabled: ADMIN_AUTH_ENABLED,
       stationStaleMinutes: STATION_STALE_MINUTES,
@@ -760,7 +763,9 @@ function analyticsResponse(requestUrl) {
   return {
     macAddress,
     days,
+    timezone: STATION_TIMEZONE,
     generatedAt: new Date(end).toISOString(),
+    coverage: storage.getReadingStats(macAddress),
     current: storage.getAnalytics(macAddress, start, end),
     previous: storage.getAnalytics(macAddress, previousStart, start),
     rainfall
@@ -773,6 +778,7 @@ function adminStatus() {
       name: PACKAGE.name,
       version: PACKAGE.version,
       nodeVersion: process.version,
+      stationTimezone: STATION_TIMEZONE,
       startedAt: STARTED_AT,
       uptimeSeconds: Math.round(process.uptime()),
       tlsEnabled: TLS_ENABLED,
@@ -1278,6 +1284,16 @@ function loadDotEnv(filePath) {
 
 function clean(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function timezoneFromEnv() {
+  const value = clean(process.env.STATION_TIMEZONE) || clean(process.env.TZ) || "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return value;
+  } catch {
+    throw new Error(`STATION_TIMEZONE must be a valid IANA timezone; received ${value}.`);
+  }
 }
 
 function booleanFromEnv(name, fallback) {

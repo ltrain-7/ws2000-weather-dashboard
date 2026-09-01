@@ -70,3 +70,44 @@ test("empty analytics preserve missing values instead of reporting false zeroes"
   assert.equal(analytics.rainfallTotalIn, 0);
   assert.equal(analytics.wettestDay, null);
 });
+
+test("daily rainfall follows the configured station timezone", (context) => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  context.after(() => {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  });
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-timezone-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = createWeatherStore({
+    dbPath: path.join(directory, "weather.db"),
+    retentionDays: 365
+  });
+  context.after(() => store.close());
+
+  const macAddress = "timezone-test-station";
+  for (const [date, rain] of [
+    ["2026-08-24T01:00:00Z", 0.4],
+    ["2026-08-24T08:00:00Z", 0.2]
+  ]) {
+    store.saveReading({
+      macAddress,
+      dateutc: Date.parse(date),
+      tempf: 70,
+      dailyrainin: rain,
+      hourlyrainin: rain
+    }, "test");
+  }
+
+  const analytics = store.getAnalytics(
+    macAddress,
+    Date.parse("2026-08-23T00:00:00Z"),
+    Date.parse("2026-08-25T00:00:00Z")
+  );
+  assert.deepEqual(analytics.dailyRain, [
+    { day: "2026-08-23", rainIn: 0.4 },
+    { day: "2026-08-24", rainIn: 0.2 }
+  ]);
+});
