@@ -41,12 +41,15 @@ test("dashboard controls retain accessible interaction states", () => {
 
   assert.match(dashboard, /role="tablist" aria-label="Chart metric"/);
   assert.match(dashboard, /aria-pressed="true" data-range-days="0"/);
+  assert.match(dashboard, /data-range-days="1">1D<\/button>/);
   assert.match(dashboard, /aria-describedby="chartSummary chartMessage"/);
   assert.match(dashboard, /id="chartDataTable"/);
   assert.match(script, /addEventListener\("keydown"/);
   assert.match(script, /setAttribute\("aria-selected"/);
   assert.match(script, /max-height: 900px/);
   assert.match(script, /shortDesktopConditionsOpen/);
+  assert.match(script, /\["High temp", current\.maximumTempf/);
+  assert.match(script, /\["Low temp", current\.minimumTempf/);
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
   assert.match(styles, /min-height:\s*180px/);
