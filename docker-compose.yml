@@ -7,6 +7,7 @@ services:
     env_file:
       - .env
     environment:
+      APP_IMAGE: "${WS2000_IMAGE:-ghcr.io/ltrain-7/ws2000-weather-dashboard:stable}"
       SQLITE_DB_PATH: /app/data/weather.db
       BACKUP_DIR: /app/backups
     ports:

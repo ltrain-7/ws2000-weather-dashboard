@@ -15,6 +15,7 @@ const state = {
   historyLoading: false,
   historyError: ""
 };
+const historyTime = window.WeatherHistoryTime;
 
 let chartModel = null;
 
@@ -782,66 +783,18 @@ function renderHealth() {
 }
 
 function renderInsights() {
-  const analytics = state.analytics;
-  if (!analytics?.current) {
-    const message = `<p class="muted">No stored insights are available for this period.</p>`;
-    els.summaryGrid.innerHTML = message;
-    els.comparisonGrid.innerHTML = message;
-    els.rainfallGrid.innerHTML = message;
-    return;
-  }
-  const current = state.historyDate ? summarizeHistory(state.history) : analytics.current;
-  const previous = state.historyDate ? summarizeHistory(state.comparisonHistory) : analytics.previous;
-  els.comparisonTitle.textContent = state.historyDate ? `${formatSelectedDate(state.historyDate)} vs previous day` : state.historyRangeDays ? `${rangeLabel(state.historyRangeDays)} vs previous` : "Last 24 hours vs previous";
-  const comparisons = [
-    ["Average temp", current.averageTempf, previous?.averageTempf, "°F"],
-    ["High temp", current.maximumTempf, previous?.maximumTempf, "°F"],
-    ["Low temp", current.minimumTempf, previous?.minimumTempf, "°F"],
-    ["Average humidity", current.averageHumidity, previous?.averageHumidity, "%"],
-    ["Peak gust", current.maximumGustMph, previous?.maximumGustMph, "mph"],
-    ["Rainfall", current.rainfallTotalIn, previous?.rainfallTotalIn, "in"]
-  ];
-  els.summaryGrid.innerHTML = comparisons.map(([label, value, , unit]) => statCard(label, value, null, unit)).join("");
-  els.comparisonGrid.innerHTML = comparisons.map(([label, value, prior, unit]) => statCard(label, value, prior, unit)).join("");
-  const rain = analytics.rainfall || {};
-  const wettest = current.wettestDay;
-  els.rainfallGrid.innerHTML = [
-    ["Today", rain.day?.rainfallTotalIn, null, "in"],
-    ["Last 7 days", rain.week?.rainfallTotalIn, null, "in"],
-    ["This month", rain.month?.rainfallTotalIn, null, "in"],
-    ["This year", rain.year?.rainfallTotalIn, null, "in"]
-  ].map(([label, value, prior, unit]) => statCard(label, value, prior, unit)).join("") +
-    `<div class="stat-card"><span>Wettest day</span><strong>${wettest ? `${formatDateOnly(wettest.day)} · ${Number(wettest.rainIn).toFixed(2)} in` : "--"}</strong></div>`;
-}
-
-function summarizeHistory(history) {
-  const rows = normalizeHistory(history);
-  const values = (key) => rows.map((row) => Number(row[key])).filter(Number.isFinite);
-  const average = (items) => items.length ? items.reduce((sum, value) => sum + value, 0) / items.length : null;
-  const maximum = (items) => items.length ? Math.max(...items) : null;
-  const rain = values("dailyrainin");
-  const temperatures = values("tempf");
-  return {
-    averageTempf: average(temperatures),
-    minimumTempf: temperatures.length ? Math.min(...temperatures) : null,
-    maximumTempf: maximum(temperatures),
-    averageHumidity: average(values("humidity")),
-    maximumGustMph: maximum(values("windgustmph")),
-    rainfallTotalIn: maximum(rain)
-  };
-}
-
-function statCard(label, value, previous, unit) {
-  const numeric = Number(value);
-  const previousNumber = Number(previous);
-  const hasPrevious = previous !== null && previous !== undefined && previous !== "" && Number.isFinite(previousNumber);
-  const rendered = Number.isFinite(numeric) ? formatUnitValue(numeric, unit, unit === "in" ? 2 : 1) : "--";
-  let delta = "";
-  if (Number.isFinite(numeric) && hasPrevious) {
-    const difference = numeric - previousNumber;
-    delta = `<small>${difference >= 0 ? "+" : ""}${formatUnitValue(difference, unit, unit === "in" ? 2 : 1)} vs previous</small>`;
-  }
-  return `<div class="stat-card"><span>${label}</span><strong>${rendered}</strong>${delta}</div>`;
+  const view = window.WeatherInsights.render({
+    analytics: state.analytics,
+    comparisonHistory: state.comparisonHistory,
+    history: state.history,
+    historyDate: state.historyDate,
+    historyRangeDays: state.historyRangeDays,
+    normalizeHistory
+  }, { formatDateOnly, formatSelectedDate, formatTime, formatUnitValue, rangeLabel });
+  els.summaryGrid.innerHTML = view.summaryHtml;
+  els.comparisonGrid.innerHTML = view.comparisonHtml;
+  els.comparisonTitle.textContent = view.comparisonTitle;
+  els.rainfallGrid.innerHTML = view.rainfallHtml;
 }
 
 function rollingAverage(points, windowMs) {
@@ -972,15 +925,7 @@ function compassText(degrees) {
 }
 
 function formatTime(value) {
-  const date = new Date(Number(value));
-  if (Number.isNaN(date.getTime())) return "--";
-  return new Intl.DateTimeFormat([], {
-    timeZone: state.config?.stationTimezone,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
+  return historyTime.formatTimestamp(value, state.config?.stationTimezone);
 }
 
 function formatRelativeAge(value) {
@@ -1011,69 +956,20 @@ function formatMetricValue(metric, value) {
 }
 
 function historyDateRange(value) {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  if (![year, month, day].every(Number.isFinite)) return null;
   const timezone = state.config?.stationTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const start = zonedTimeToUtc(year, month, day, timezone);
-  const following = new Date(Date.UTC(year, month - 1, day + 1));
-  const end = zonedTimeToUtc(
-    following.getUTCFullYear(),
-    following.getUTCMonth() + 1,
-    following.getUTCDate(),
-    timezone
-  ) - 1;
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-  return { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
-}
-
-function zonedTimeToUtc(year, month, day, timezone) {
-  const desired = Date.UTC(year, month - 1, day, 0, 0, 0);
-  let candidate = desired;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23"
-    }).formatToParts(new Date(candidate));
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    const represented = Date.UTC(
-      Number(values.year),
-      Number(values.month) - 1,
-      Number(values.day),
-      Number(values.hour),
-      Number(values.minute),
-      Number(values.second)
-    );
-    candidate += desired - represented;
-  }
-  return candidate;
+  return historyTime.historyDateRange(value, timezone);
 }
 
 function rollingDateRange(days) {
-  if (!days) return null;
-  const end = new Date();
-  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
-  return { start: start.toISOString(), end: end.toISOString() };
+  return historyTime.rollingDateRange(days);
 }
 
 function rangeLabel(days) {
-  return Number(days) === 1 ? "Last 1 day" : `Last ${days} days`;
+  return historyTime.rangeLabel(days);
 }
 
 function previousDateRange(range) {
-  const start = Date.parse(range.start);
-  const end = Date.parse(range.end);
-  const duration = end - start;
-  return {
-    start: new Date(start - duration).toISOString(),
-    end: new Date(start - 1).toISOString()
-  };
+  return historyTime.previousDateRange(range);
 }
 
 function registerServiceWorker() {
@@ -1089,37 +985,19 @@ function registerServiceWorker() {
 }
 
 function toDateInputValue(date, timezone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
+  return historyTime.toDateInputValue(date, timezone);
 }
 
 function formatTimestampDate(value) {
-  return new Intl.DateTimeFormat([], {
-    timeZone: state.config?.stationTimezone,
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  }).format(new Date(Number(value)));
+  return historyTime.formatTimestampDate(value, state.config?.stationTimezone);
 }
 
 function formatSelectedDate(value) {
-  const date = new Date(`${value}T12:00:00`);
-  return new Intl.DateTimeFormat([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  }).format(date);
+  return historyTime.formatSelectedDate(value);
 }
 
 function formatDateOnly(value) {
-  const date = new Date(`${value}T12:00:00`);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat([], { month: "short", day: "numeric" }).format(date);
+  return historyTime.formatDateOnly(value);
 }
 
 function round(value) {

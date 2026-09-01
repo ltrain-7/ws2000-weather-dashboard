@@ -1,5 +1,5 @@
-const CACHE_NAME = "ws2000-v1.7.0";
-const STATIC_ASSETS = ["/", "/index.html", "/styles.css?v=1.7.0", "/app.js?v=1.7.0", "/manifest.webmanifest", "/icon.svg"];
+const CACHE_NAME = "ws2000-v1.8.0";
+const STATIC_ASSETS = ["/", "/index.html", "/styles.css?v=1.8.0", "/history-time.js?v=1.8.0", "/insights.js?v=1.8.0", "/app.js?v=1.8.0", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));

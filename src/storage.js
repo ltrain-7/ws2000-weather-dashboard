@@ -257,6 +257,20 @@ class WeatherStore {
         FROM weather_readings
         WHERE mac_address = ? AND dateutc >= ? AND dateutc < ?
       `),
+      minimumTemperature: this.db.prepare(`
+        SELECT tempf AS value, dateutc
+        FROM weather_readings
+        WHERE mac_address = ? AND dateutc >= ? AND dateutc < ? AND tempf IS NOT NULL
+        ORDER BY tempf ASC, dateutc ASC
+        LIMIT 1
+      `),
+      maximumTemperature: this.db.prepare(`
+        SELECT tempf AS value, dateutc
+        FROM weather_readings
+        WHERE mac_address = ? AND dateutc >= ? AND dateutc < ? AND tempf IS NOT NULL
+        ORDER BY tempf DESC, dateutc ASC
+        LIMIT 1
+      `),
       dailyRain: this.db.prepare(`
         SELECT
           date(dateutc / 1000, 'unixepoch', 'localtime') AS day,
@@ -381,6 +395,8 @@ class WeatherStore {
     const start = normalizeDateutc({ dateutc: startDate });
     const end = normalizeDateutc({ dateutc: endDate });
     const summary = this.statements.periodSummary.get(macAddress, start, end);
+    const minimumTemperature = this.statements.minimumTemperature.get(macAddress, start, end);
+    const maximumTemperature = this.statements.maximumTemperature.get(macAddress, start, end);
     const dailyRain = this.statements.dailyRain
       .all(macAddress, start, end)
       .map((row) => ({ day: row.day, rainIn: numberOrZero(row.rain_in) }));
@@ -391,6 +407,12 @@ class WeatherStore {
       averageTempf: numberOrNull(summary.average_tempf),
       minimumTempf: numberOrNull(summary.minimum_tempf),
       maximumTempf: numberOrNull(summary.maximum_tempf),
+      minimumTempAt: minimumTemperature?.dateutc
+        ? new Date(minimumTemperature.dateutc).toISOString()
+        : null,
+      maximumTempAt: maximumTemperature?.dateutc
+        ? new Date(maximumTemperature.dateutc).toISOString()
+        : null,
       averageHumidity: numberOrNull(summary.average_humidity),
       averageWindMph: numberOrNull(summary.average_wind_mph),
       maximumGustMph: numberOrNull(summary.maximum_gust_mph),
@@ -480,6 +502,11 @@ function numberOrZero(value) {
 function emptyAnalytics() {
   return {
     readingCount: 0,
+    averageTempf: null,
+    minimumTempf: null,
+    maximumTempf: null,
+    minimumTempAt: null,
+    maximumTempAt: null,
     rainfallTotalIn: 0,
     wettestDay: null,
     dailyRain: []

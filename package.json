@@ -1,6 +1,6 @@
 {
   "name": "ws2000-weather-dashboard",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Portable, low-resource dashboard for Ambient Weather WS-2000 stations.",
   "main": "src/server.js",
   "scripts": {
@@ -14,7 +14,11 @@
     "node": ">=22.5"
   },
   "dependencies": {
+    "parseuri": "file:vendor/parseuri",
     "socket.io-client": "2.5.0"
+  },
+  "overrides": {
+    "parseuri": "$parseuri"
   },
   "devDependencies": {
     "playwright-core": "1.62.1"

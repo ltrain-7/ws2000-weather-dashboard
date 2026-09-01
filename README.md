@@ -2,7 +2,7 @@
 
 A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
 
-It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and optional built-in authentication for its private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, and includes chart tooltips plus an accessible data table.
+It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and optional built-in authentication for its private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, includes chart tooltips plus an accessible data table, and records when period high and low temperatures occurred.
 
 The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
@@ -44,7 +44,7 @@ The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspber
 
 6. Open `http://RASPBERRY-PI-IP:3000`.
 
-Open `/admin.html` to view application, connection, station, storage, backup, and backfill status. The page never returns Ambient API key values.
+Open `/admin.html` to view application, deployment, connection, station, storage, backup, and backfill status. A deployment performed by the guarded updater records the exact image digest, revision, and successful update time. The page never returns Ambient API key values.
 
 For HTTPS on Synology DSM or Raspberry Pi/Linux, see [HTTPS and TLS setup](docs/HTTPS.md).
 To protect the administration page and every maintenance API with a secure login, see [Administrator authentication](docs/AUTHENTICATION.md).
@@ -168,7 +168,7 @@ docker compose restart
 
 The application creates a consistent, integrity-checked SQLite snapshot under `backups/` every 24 hours by default. Use **Admin → Create backup** for an immediate snapshot and **Admin → Check database** to verify the active database. Application backups named `weather-*.db` are pruned according to `BACKUP_RETENTION_DAYS` and `BACKUP_MAX_FILES`.
 
-The guarded image updater separately creates a compressed `weather-data-*.tgz` backup before changing containers. Keeping both mechanisms provides a recent database snapshot plus a pre-update rollback point.
+The guarded image updater separately creates a compressed `weather-data-*.tgz` backup before changing containers. Keeping both mechanisms provides a recent database snapshot plus a pre-update rollback point. Administration identifies both backup types and shows the newest successful backup.
 
 For a consistent offline backup:
 
@@ -246,7 +246,7 @@ Run the guarded updater manually:
 ./scripts/update.sh
 ```
 
-The updater pulls the `stable` image, stops the app briefly for a consistent SQLite backup, starts the new version, checks `/api/health`, and rolls back to the prior image if the health check fails. Backups are stored under `backups/`.
+The updater pulls the `stable` image, stops the app briefly for a consistent SQLite backup, starts the new version, checks `/api/health`, and rolls back to the prior image if the health check fails. Backups are stored under `backups/`. After a successful health check it records the deployed image, immutable digest, source revision, and update time in `data/deployment.json`; Administration displays that record. A failed update does not replace the last-known-good deployment record.
 
 Updater backups are limited to 12 files and 90 days by default. Override either limit for a manual or scheduled run with `BACKUP_MAX_FILES` or `BACKUP_RETENTION_DAYS`; set a value to `0` to disable that limit.
 
@@ -302,9 +302,16 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 
 - The health banner warns when the latest packet is older than `STATION_STALE_MINUTES`, becomes offline after four times that interval, or reports a low outdoor battery.
 - Enable **Compare previous period** to overlay the preceding day or rolling range as a dashed line and show summary differences.
+- Temperature period details include the timestamp at which the high and low were observed.
 - Rainfall totals use the maximum station daily counter for each local calendar day, preventing frequent observations from being double-counted. The dashboard shows today, the last seven days, the current month, the current year, and the wettest day in the analysis period.
 - The administration page can start a 1–365 day Ambient history backfill. Progress remains visible while the server process is running.
 - Raw station packet fields are kept off the main dashboard and remain available under **Administration → Advanced station fields**.
+
+## Security headers and dependency policy
+
+The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. Keep `ADMIN_TRUST_PROXY=true` limited to deployments where the application port is bound to loopback and DSM or another trusted proxy terminates HTTPS.
+
+Production dependency auditing runs at moderate severity in GitHub Actions. Socket.IO 2 compatibility is retained for Ambient Weather realtime service support, while its abandoned vulnerable URL parser is replaced by the repository's bounded WHATWG-based compatibility package under `vendor/parseuri`.
 
 ## Troubleshooting
 

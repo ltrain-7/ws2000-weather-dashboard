@@ -118,19 +118,22 @@ async function runAction(url, label) {
 
 function renderStatus(status) {
   const app = status.application || {};
+  const deployment = status.deployment || {};
   const storage = status.storage || {};
   const backups = status.backups || {};
   const health = status.stationHealth?.[0];
   const backfill = status.backfill || {};
   const cards = [
-    ["Version", app.version || "--", `Node ${app.nodeVersion || "--"}`],
+    ["Version", app.version || "--", `${shortRevision(app.revision)} · Node ${app.nodeVersion || "--"}`],
+    ["Container image", shortImage(deployment.image), shortDigest(deployment.digest)],
+    ["Last deployment", formatDate(deployment.updatedAt), deployment.metadataSource === "updater" ? "Recorded by safe updater" : "Container start time"],
     ["Uptime", duration(app.uptimeSeconds), `Started ${formatDate(app.startedAt)}`],
     ["Station", health?.status || "No reading", health ? `${health.ageMinutes} minutes old` : "Waiting for data"],
     ["Realtime", status.connections?.realtime?.status || "--", status.connections?.realtime?.message || ""],
     ["Stored readings", number(storage.readingCount), `${formatDate(storage.firstReadingAt)} to ${formatDate(storage.latestReadingAt)}`],
     ["Database", bytes(storage.databaseBytes), storage.integrity?.ok ? "Integrity OK" : `Integrity: ${storage.integrity?.result || "unknown"}`],
     ["Backups", number(backups.files?.length), backups.enabled ? `Every ${backups.intervalHours} hours` : "Automatic backups disabled"],
-    ["Latest backup", backups.files?.[0]?.filename || "None", backups.files?.[0] ? `${bytes(backups.files[0].bytes)} · ${formatDate(backups.files[0].createdAt)}` : "Create one now"],
+    ["Latest backup", backups.files?.[0]?.filename || "None", backups.files?.[0] ? `${backupType(backups.files[0].type)} · ${bytes(backups.files[0].bytes)} · ${formatDate(backups.files[0].createdAt)}` : "Create one now"],
     ["Backfill", backfill.running ? "Running" : "Idle", backfill.running ? `${backfill.pages} pages · oldest ${formatDate(backfill.oldestReadingAt)}` : backfill.completedAt ? `Completed ${formatDate(backfill.completedAt)}` : "Not run this session"]
   ];
   adminGrid.innerHTML = "";
@@ -185,6 +188,14 @@ function duration(seconds) {
   const hours = Math.floor((value % 86400) / 3600);
   return days ? `${days}d ${hours}h` : `${hours}h ${Math.floor((value % 3600) / 60)}m`;
 }
+function shortRevision(value) { return value ? `Revision ${String(value).slice(0, 8)}` : "Revision unavailable"; }
+function shortImage(value) { return value ? String(value).replace(/^ghcr\.io\/ltrain-7\//, "") : "Not recorded"; }
+function shortDigest(value) {
+  if (!value) return "Digest unavailable";
+  const digest = String(value).split("@").pop();
+  return digest.length > 24 ? `${digest.slice(0, 20)}…` : digest;
+}
+function backupType(value) { return value === "deployment" ? "Deployment backup" : "Database backup"; }
 function formatDate(value) { return value ? new Intl.DateTimeFormat([], { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "--"; }
 function formatRawValue(key, value) {
   const numeric = Number(value);
