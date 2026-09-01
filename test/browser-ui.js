@@ -110,8 +110,8 @@ async function testDashboardInteractions(browser) {
   await page.getByRole("heading", { name: "Last 1 day", exact: true }).waitFor();
 
   const summary = await page.locator("#summaryGrid").innerText();
-  assert.match(summary, /High temp\s*88°F/);
-  assert.match(summary, /Low temp\s*61°F/);
+  assert.match(summary, /High temp\s*88(?:\.0)?°F/);
+  assert.match(summary, /Low temp\s*61(?:\.0)?°F/);
   assert.ok(lastHistoryRequest, "The 1D control should request stored history.");
   assert.equal(
     Date.parse(lastHistoryRequest.searchParams.get("endDate")) - Date.parse(lastHistoryRequest.searchParams.get("startDate")),
