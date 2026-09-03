@@ -15,6 +15,7 @@ function createForecastService(options = {}) {
   const timezone = options.timezone || "auto";
   const days = clamp(Number(options.days || 5), 3, 7);
   const cacheTtlMs = clamp(Number(options.cacheTtlMs || 60 * 60 * 1000), 15 * 60 * 1000, 6 * 60 * 60 * 1000);
+  const failureBackoffMs = clamp(Number(options.failureBackoffMs || 60 * 1000), 15 * 1000, 15 * 60 * 1000);
   const origin = options.origin || DEFAULT_ORIGIN;
   const fetchImpl = options.fetchImpl || fetch;
   const nowMs = options.now || Date.now;
@@ -27,6 +28,7 @@ function createForecastService(options = {}) {
   let location = configuredLocation;
   let cached = null;
   let lastError = null;
+  let lastFailureAt = null;
 
   function useDevice(device) {
     if (!enabled || configuredLocation) return false;
@@ -36,7 +38,11 @@ function createForecastService(options = {}) {
       || location.latitude !== detected.latitude
       || location.longitude !== detected.longitude;
     location = detected;
-    if (changed) cached = null;
+    if (changed) {
+      cached = null;
+      lastError = null;
+      lastFailureAt = null;
+    }
     return changed;
   }
 
@@ -49,6 +55,12 @@ function createForecastService(options = {}) {
     if (cached && now - Date.parse(cached.updatedAt) < cacheTtlMs) {
       return { ...cached, cached: true };
     }
+    if (lastFailureAt !== null && now - lastFailureAt < failureBackoffMs) {
+      if (cached) return { ...cached, cached: true, stale: true };
+      const error = new Error("Forecast provider retry is temporarily delayed.");
+      error.retryAfterSeconds = Math.ceil((failureBackoffMs - (now - lastFailureAt)) / 1000);
+      throw error;
+    }
 
     try {
       const url = forecastUrl(origin, location, timezone, days);
@@ -57,9 +69,11 @@ function createForecastService(options = {}) {
       const payload = await response.json();
       cached = normalizeForecast(payload, location, days, new Date(now).toISOString());
       lastError = null;
+      lastFailureAt = null;
       return { ...cached, cached: false };
     } catch (error) {
       lastError = error && error.message ? error.message : String(error);
+      lastFailureAt = now;
       if (cached) return { ...cached, cached: true, stale: true };
       throw error;
     }
@@ -72,7 +86,9 @@ function createForecastService(options = {}) {
       locationName: location?.name || null,
       locationSource: location?.source || null,
       lastUpdatedAt: cached?.updatedAt || null,
-      lastError
+      lastError,
+      lastFailureAt: lastFailureAt === null ? null : new Date(lastFailureAt).toISOString(),
+      retryAt: lastFailureAt === null ? null : new Date(lastFailureAt + failureBackoffMs).toISOString()
     };
   }
 
@@ -162,6 +178,7 @@ function normalizeLocation(value) {
   const longitude = Number(value.longitude);
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null;
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
+  if (latitude === 0 && longitude === 0) return null;
   return {
     latitude,
     longitude,

@@ -2,7 +2,7 @@ const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
-const { AdminAuth } = require("./auth");
+const { AdminAuth, safeStringEqual } = require("./auth");
 const { createDeploymentStatus } = require("./deployment-status");
 const { createForecastService } = require("./forecast");
 const { createHttpResponder } = require("./http-response");
@@ -63,6 +63,8 @@ const { redirect, securityHeaders, sendJson, sendText, serveStatic } = createHtt
   strictTransport: TLS_ENABLED || ADMIN_TRUST_PROXY
 });
 
+assertTrustedProxyBinding();
+
 if (ADMIN_AUTH_ENABLED && !ADMIN_PASSWORD_HASH) {
   throw new Error(
     "ADMIN_AUTH_ENABLED is true but ADMIN_PASSWORD_HASH or ADMIN_PASSWORD_HASH_FILE is not configured."
@@ -75,6 +77,10 @@ const adminAuth = new AdminAuth({
   passwordHash: ADMIN_PASSWORD_HASH,
   sessionTtlMs: ADMIN_SESSION_TTL_MINUTES * 60 * 1000
 });
+const authCleanupTimer = ADMIN_AUTH_ENABLED
+  ? setInterval(() => adminAuth.sweep(), 5 * 60 * 1000)
+  : null;
+authCleanupTimer?.unref();
 
 const configured = Boolean(APPLICATION_KEY && API_KEYS.length);
 const clients = new Set();
@@ -167,7 +173,7 @@ const requestHandler = async (req, res) => {
       }
     }
 
-    await serveStatic(requestUrl, res);
+    await serveStatic(requestUrl, res, req.headers);
   } catch (error) {
     const statusCode = Number(error.statusCode);
     if (statusCode >= 400 && statusCode < 500) {
@@ -377,8 +383,13 @@ async function handleHistory(res, requestUrl) {
   }
 
   const limit = clamp(Number(requestUrl.searchParams.get("limit") || HISTORY_LIMIT), 1, 10000);
-  const endDate = clean(requestUrl.searchParams.get("endDate"));
-  const startDate = clean(requestUrl.searchParams.get("startDate"));
+  const endDate = historyDateParameter(requestUrl, "endDate");
+  const startDate = historyDateParameter(requestUrl, "startDate");
+  if (startDate && endDate && Date.parse(startDate) > Date.parse(endDate)) {
+    const error = new Error("startDate must not be later than endDate.");
+    error.statusCode = 400;
+    throw error;
+  }
   const maxPoints = clamp(Number(requestUrl.searchParams.get("maxPoints") || 0), 0, 2000);
   const source = clean(requestUrl.searchParams.get("source"));
   const apiKey = apiKeyByMac.get(macAddress) || API_KEYS[0];
@@ -839,7 +850,7 @@ async function handleAuthApi(req, res, requestUrl) {
     const body = await readJsonBody(req, 8192);
     const username = clean(body.username).slice(0, 128);
     const password = typeof body.password === "string" ? body.password.slice(0, 1024) : "";
-    const clientKey = `${clientAddress(req)}|${username.toLowerCase() || "unknown"}`;
+    const clientKey = clientAddress(req);
     const result = await adminAuth.authenticate(username, password, clientKey);
     if (!result.ok) {
       if (result.delayMs) await sleep(result.delayMs);
@@ -905,7 +916,7 @@ function authorizeAdminMutation(req, res, session) {
   }
   if (
     ADMIN_AUTH_ENABLED &&
-    (!session?.csrfToken || clean(req.headers["x-csrf-token"]) !== session.csrfToken)
+    (!session?.csrfToken || !safeStringEqual(clean(req.headers["x-csrf-token"]), session.csrfToken))
   ) {
     sendJson(res, 403, { error: "A valid CSRF token is required." }, { "cache-control": "no-store" });
     return false;
@@ -1104,6 +1115,7 @@ function readLocalHistory(macAddress, options) {
   try {
     return storage.getHistory(macAddress, options);
   } catch (error) {
+    if (Number(error.statusCode) >= 400 && Number(error.statusCode) < 500) throw error;
     recordError(error);
     return liveHistoryFor(macAddress).data;
   }
@@ -1170,6 +1182,7 @@ function recordError(error) {
 }
 
 function shutdown() {
+  if (authCleanupTimer) clearInterval(authCleanupTimer);
   adminAuth.clearSessions();
   storage.close();
   server.close(() => process.exit(0));
@@ -1221,6 +1234,37 @@ function loadDotEnv(filePath) {
 
 function clean(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function historyDateParameter(requestUrl, name) {
+  const value = clean(requestUrl.searchParams.get(name));
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    const error = new Error(`${name} must be a valid date or timestamp.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function assertTrustedProxyBinding() {
+  if (!ADMIN_TRUST_PROXY || isLoopbackHost(HOST)) return;
+  const containerized = booleanFromEnv("CONTAINERIZED", false);
+  const publishedBinding = clean(process.env.DASHBOARD_PORT);
+  if (containerized && isLoopbackPublishedPort(publishedBinding)) return;
+  throw new Error(
+    "ADMIN_TRUST_PROXY requires HOST to be loopback, or a container published only through a loopback DASHBOARD_PORT such as 127.0.0.1:3000."
+  );
+}
+
+function isLoopbackHost(value) {
+  return ["127.0.0.1", "::1", "localhost"].includes(clean(value).toLowerCase());
+}
+
+function isLoopbackPublishedPort(value) {
+  return /^(?:127\.0\.0\.1|localhost):\d+$/.test(value)
+    || /^\[::1\]:\d+$/.test(value);
 }
 
 function timezoneFromEnv() {

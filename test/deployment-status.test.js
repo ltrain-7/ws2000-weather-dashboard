@@ -36,6 +36,36 @@ test("deployment status reports updater metadata and both backup types", (contex
     metadataSource: "updater"
   });
   assert.deepEqual(new Set(deployment.listBackups().map((backup) => backup.type)), new Set(["database", "deployment"]));
+  assert.deepEqual(
+    new Set(deployment.listBackups().map((backup) => backup.createdAt)),
+    new Set(["2026-09-01T01:02:03.000Z"])
+  );
+});
+
+test("backup pruning uses filename timestamps for database and deployment archives", (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-pruning-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  for (const filename of [
+    "weather-20200101T010203Z.db",
+    "weather-data-20200101-010203.tgz",
+    "weather-20990101T010203Z.db",
+    "weather-data-20990101-010203.tgz"
+  ]) {
+    const filePath = path.join(directory, filename);
+    fs.writeFileSync(filePath, filename);
+    fs.utimesSync(filePath, new Date(), new Date());
+  }
+  const deployment = createDeploymentStatus({
+    backupDir: directory,
+    metadataPath: path.join(directory, "missing.json"),
+    packageInfo: { version: "test" },
+    startedAt: new Date().toISOString()
+  });
+  deployment.pruneBackups(30, 12);
+  assert.deepEqual(
+    deployment.listBackups().map((backup) => backup.filename).sort(),
+    ["weather-20990101T010203Z.db", "weather-data-20990101-010203.tgz"].sort()
+  );
 });
 
 test("guarded updater records deployment metadata only after a healthy start", (context) => {

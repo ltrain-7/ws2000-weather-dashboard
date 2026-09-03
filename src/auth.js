@@ -87,15 +87,14 @@ class LoginLimiter {
     this.now = options.now || Date.now;
     this.windowMs = options.windowMs || 15 * 60 * 1000;
     this.maxAttempts = options.maxAttempts || 5;
-    this.globalMaxAttempts = options.globalMaxAttempts || this.maxAttempts * 4;
+    this.maxEntries = options.maxEntries || 1024;
     this.entries = new Map();
   }
 
   check(key) {
     const now = this.now();
     const local = this.current(String(key || "unknown"), now, this.maxAttempts);
-    const global = this.current("__global__", now, this.globalMaxAttempts);
-    const blockedUntil = Math.max(local.blockedUntil || 0, global.blockedUntil || 0);
+    const blockedUntil = local.blockedUntil || 0;
     return {
       allowed: blockedUntil <= now,
       retryAfterSeconds: blockedUntil > now ? Math.max(1, Math.ceil((blockedUntil - now) / 1000)) : 0
@@ -105,7 +104,6 @@ class LoginLimiter {
   recordFailure(key) {
     const now = this.now();
     const local = this.increment(String(key || "unknown"), now, this.maxAttempts);
-    this.increment("__global__", now, this.globalMaxAttempts);
     return {
       delayMs: Math.min(2000, local.count * 250),
       ...this.check(key)
@@ -116,9 +114,25 @@ class LoginLimiter {
     this.entries.delete(String(key || "unknown"));
   }
 
+  sweep(now = this.now()) {
+    for (const [key, entry] of this.entries) {
+      if (now - entry.startedAt >= this.windowMs && entry.blockedUntil <= now) {
+        this.entries.delete(key);
+      }
+    }
+    return this.entries.size;
+  }
+
   current(key, now, maximum) {
     const existing = this.entries.get(key);
     if (!existing || now - existing.startedAt >= this.windowMs) {
+      if (!existing && this.entries.size >= this.maxEntries) {
+        this.sweep(now);
+        if (this.entries.size >= this.maxEntries) {
+          const oldestKey = this.entries.keys().next().value;
+          if (oldestKey !== undefined) this.entries.delete(oldestKey);
+        }
+      }
       const fresh = { count: 0, startedAt: now, blockedUntil: 0 };
       this.entries.set(key, fresh);
       return fresh;
@@ -146,6 +160,7 @@ class AdminAuth {
     this.now = options.now || Date.now;
     this.randomBytes = options.randomBytes || crypto.randomBytes;
     this.verify = options.verifyPassword || verifyPassword;
+    this.maxSessions = options.maxSessions || 128;
     this.sessions = new Map();
     this.limiter = options.limiter || new LoginLimiter({ now: this.now });
 
@@ -167,6 +182,12 @@ class AdminAuth {
     }
 
     this.limiter.reset(clientKey);
+    this.sweep();
+    if (this.sessions.size >= this.maxSessions) {
+      const oldest = [...this.sessions.entries()]
+        .sort((left, right) => left[1].createdAt - right[1].createdAt)[0];
+      if (oldest) this.sessions.delete(oldest[0]);
+    }
     const token = this.randomBytes(32).toString("base64url");
     const csrfToken = this.randomBytes(32).toString("base64url");
     const now = this.now();
@@ -199,6 +220,14 @@ class AdminAuth {
   clearSessions() {
     this.sessions.clear();
   }
+
+  sweep(now = this.now()) {
+    this.limiter.sweep(now);
+    for (const [key, session] of this.sessions) {
+      if (session.expiresAt <= now) this.sessions.delete(key);
+    }
+    return { limiterEntries: this.limiter.entries.size, sessions: this.sessions.size };
+  }
 }
 
 function hashToken(token) {
@@ -217,5 +246,6 @@ module.exports = {
   LoginLimiter,
   hashPassword,
   parsePasswordHash,
+  safeStringEqual,
   verifyPassword
 };

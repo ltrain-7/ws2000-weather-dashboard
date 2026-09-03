@@ -15,6 +15,7 @@ RUN mkdir -p /app/data /app/backups && chown -R node:node /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV CONTAINERIZED=true
 ENV APP_REVISION=$APP_REVISION
 
 EXPOSE 3000

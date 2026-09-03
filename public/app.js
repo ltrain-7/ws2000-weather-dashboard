@@ -16,7 +16,9 @@ const state = {
   historyError: "",
   forecast: null,
   forecastLoading: false,
-  forecastRetries: 0
+  forecastRetries: 0,
+  eventStreamFailures: 0,
+  eventStreamDisconnectedAt: null
 };
 const historyTime = window.WeatherHistoryTime;
 
@@ -254,6 +256,10 @@ function renderForecast() {
 
 function connectEventStream() {
   const source = new EventSource("/api/events");
+  source.addEventListener("open", () => {
+    state.eventStreamFailures = 0;
+    state.eventStreamDisconnectedAt = null;
+  });
   source.addEventListener("state", (event) => applyState(JSON.parse(event.data)));
   source.addEventListener("update", (event) => {
     const payload = JSON.parse(event.data);
@@ -270,7 +276,14 @@ function connectEventStream() {
   });
   source.addEventListener("error", () => {
     if (!state.config?.configured) return;
-    setStatus("error", "Reconnecting");
+    state.eventStreamFailures += 1;
+    state.eventStreamDisconnectedAt ||= Date.now();
+    const extendedOutage = state.eventStreamFailures >= 5
+      || Date.now() - state.eventStreamDisconnectedAt >= 30000;
+    setStatus("error", extendedOutage ? "Still reconnecting" : "Reconnecting");
+    if (extendedOutage) {
+      els.healthDetail.textContent = "Live updates are still unavailable. Try Refresh if the connection does not recover.";
+    }
   });
 }
 
@@ -952,27 +965,27 @@ function stationSubtitle(device) {
 }
 
 function formatTemp(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)}°F` : "--";
+  return hasNumericValue(value) ? `${round(value)}°F` : "--";
 }
 
 function formatPercent(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)}%` : "--";
+  return hasNumericValue(value) ? `${round(value)}%` : "--";
 }
 
 function formatWind(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)} mph` : "--";
+  return hasNumericValue(value) ? `${round(value)} mph` : "--";
 }
 
 function formatPressure(value) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} inHg` : "--";
+  return hasNumericValue(value) ? `${Number(value).toFixed(2)} inHg` : "--";
 }
 
 function formatRain(value) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} in` : "--";
+  return hasNumericValue(value) ? `${Number(value).toFixed(2)} in` : "--";
 }
 
 function formatSolar(value) {
-  return Number.isFinite(Number(value)) ? `${round(value)} W/m²` : "--";
+  return hasNumericValue(value) ? `${round(value)} W/m²` : "--";
 }
 
 function formatBattery(value) {
@@ -1029,8 +1042,8 @@ function formatAgeMinutes(value) {
 }
 
 function formatUnitValue(value, unit, digits = null) {
+  if (!hasNumericValue(value)) return "--";
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "--";
   const rendered = digits === null ? compactNumber(numeric) : numeric.toFixed(digits);
   return ["%", "°F"].includes(unit) ? `${rendered}${unit}` : `${rendered} ${unit}`;
 }
@@ -1095,4 +1108,11 @@ function compactNumber(value) {
   if (!Number.isFinite(number)) return "--";
   if (Math.abs(number) >= 100) return String(Math.round(number));
   return String(Number(number.toFixed(1)));
+}
+
+function hasNumericValue(value) {
+  return value !== null
+    && value !== undefined
+    && value !== ""
+    && Number.isFinite(Number(value));
 }

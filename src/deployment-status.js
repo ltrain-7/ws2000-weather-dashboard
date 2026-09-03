@@ -29,7 +29,7 @@ function createDeploymentStatus(options) {
             filename: name,
             type: name.endsWith(".tgz") ? "deployment" : "database",
             bytes: stats.size,
-            createdAt: stats.mtime.toISOString()
+            createdAt: backupCreatedAt(name, stats.mtime)
           };
         })
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -40,13 +40,15 @@ function createDeploymentStatus(options) {
 
   function pruneBackups(retentionDays, maximumFiles) {
     const now = Date.now();
-    const files = listBackups().filter((file) => file.type === "database");
-    files.forEach((file, index) => {
-      const tooOld = retentionDays > 0
-        && now - Date.parse(file.createdAt) > retentionDays * 86400000;
-      const tooMany = maximumFiles > 0 && index >= maximumFiles;
-      if (tooOld || tooMany) fs.unlinkSync(path.join(backupDir, file.filename));
-    });
+    for (const type of ["database", "deployment"]) {
+      const files = listBackups().filter((file) => file.type === type);
+      files.forEach((file, index) => {
+        const tooOld = retentionDays > 0
+          && now - Date.parse(file.createdAt) > retentionDays * 86400000;
+        const tooMany = maximumFiles > 0 && index >= maximumFiles;
+        if (tooOld || tooMany) fs.unlinkSync(path.join(backupDir, file.filename));
+      });
+    }
   }
 
   return { listBackups, pruneBackups, status };
@@ -68,6 +70,23 @@ function clean(value) {
 function validDate(value) {
   const timestamp = Date.parse(value || "");
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function backupCreatedAt(filename, fallback) {
+  const database = /^weather-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.db$/.exec(filename);
+  const deployment = /^weather-data-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.tgz$/.exec(filename);
+  const parts = database || deployment;
+  if (!parts) return fallback.toISOString();
+  const values = parts.slice(1).map(Number);
+  const timestamp = Date.UTC(values[0], values[1] - 1, values[2], values[3], values[4], values[5]);
+  const date = new Date(timestamp);
+  const valid = date.getUTCFullYear() === values[0]
+    && date.getUTCMonth() + 1 === values[1]
+    && date.getUTCDate() === values[2]
+    && date.getUTCHours() === values[3]
+    && date.getUTCMinutes() === values[4]
+    && date.getUTCSeconds() === values[5];
+  return valid ? date.toISOString() : fallback.toISOString();
 }
 
 module.exports = { createDeploymentStatus };

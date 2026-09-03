@@ -55,6 +55,19 @@ test("analytics aggregate rainfall by local day and create a verified backup", (
   assert.equal(backup.integrity.ok, true);
   assert.ok(backup.bytes > 0);
   assert.equal(fs.existsSync(backupPath), true);
+
+  assert.throws(
+    () => store.getHistory(macAddress, { startDate: "not-a-date" }),
+    (error) => error.statusCode === 400 && /startDate/.test(error.message)
+  );
+  assert.throws(
+    () => store.getAnalytics(macAddress, "not-a-date", Date.now()),
+    (error) => error.statusCode === 400 && /startDate/.test(error.message)
+  );
+  assert.throws(
+    () => store.getAnalytics(macAddress, Date.now(), Date.now() - 1),
+    (error) => error.statusCode === 400 && /earlier than endDate/.test(error.message)
+  );
 });
 
 test("empty analytics preserve missing values instead of reporting false zeroes", (context) => {

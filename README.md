@@ -238,7 +238,7 @@ docker compose up -d
 | `ADMIN_PASSWORD_HASH` | Quoted scrypt hash produced by `npm run auth:hash` |
 | `ADMIN_PASSWORD_HASH_FILE` | Optional read-only hash file, such as `/app/secrets/admin-password.hash` |
 | `ADMIN_SESSION_TTL_MINUTES` | Administrator session lifetime; defaults to 480 minutes |
-| `ADMIN_TRUST_PROXY` | Trusts a local reverse proxy's HTTPS header; use only with a loopback port binding |
+| `ADMIN_TRUST_PROXY` | Trusts a local reverse proxy's forwarded client and HTTPS headers; startup requires a loopback-only bind |
 | `TLS_ENABLED` | Enables native Node HTTPS; defaults to `false` |
 | `TLS_CERT_PATH` | Certificate chain inside the container; defaults to `/app/certs/fullchain.pem` |
 | `TLS_KEY_PATH` | Private key inside the container; defaults to `/app/certs/privkey.pem` |
@@ -316,9 +316,9 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 
 ## Security headers and dependency policy
 
-The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. Keep `ADMIN_TRUST_PROXY=true` limited to deployments where the application port is bound to loopback and DSM or another trusted proxy terminates HTTPS.
+The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. When `ADMIN_TRUST_PROXY=true`, startup fails unless `HOST` is loopback or a container deployment publishes `DASHBOARD_PORT` on loopback (for example `127.0.0.1:3000`). This prevents untrusted LAN clients from forging proxy headers that affect login rate limiting and HTTPS enforcement.
 
-Production dependency auditing runs at moderate severity in GitHub Actions. Socket.IO 2 compatibility is retained for Ambient Weather realtime service support, while its abandoned vulnerable URL parser is replaced by the repository's bounded WHATWG-based compatibility package under `vendor/parseuri`.
+Production dependency auditing runs at moderate severity in GitHub Actions and fails the workflow when findings meet that threshold. Socket.IO 2 compatibility is retained for Ambient Weather realtime service support, while its abandoned vulnerable URL parser is replaced by the repository's bounded WHATWG-based compatibility package under `vendor/parseuri`. The self-referential `parseuri: "$parseuri"` override in `package.json` intentionally forces transitive consumers to use that local replacement.
 
 ## Troubleshooting
 

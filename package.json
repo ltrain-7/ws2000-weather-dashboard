@@ -1,6 +1,6 @@
 {
   "name": "ws2000-weather-dashboard",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Portable, low-resource dashboard for Ambient Weather WS-2000 stations.",
   "main": "src/server.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "parseuri": "file:vendor/parseuri",
     "socket.io-client": "2.5.0"
   },
+  "_parseuriOverrideReason": "Keep Socket.IO 2 compatible while forcing its transitive parseuri dependency to use the maintained local replacement above.",
   "overrides": {
     "parseuri": "$parseuri"
   },

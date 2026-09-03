@@ -36,3 +36,34 @@ test("insight cards include high and low occurrence times", () => {
   assert.match(view.summaryHtml, /High temp.*88\.0°F.*Observed Sep 1, 2:15 PM/);
   assert.match(view.summaryHtml, /Low temp.*61\.0°F.*Observed Sep 1, 6:05 AM/);
 });
+
+test("insights preserve missing sensor values instead of converting them to zero", () => {
+  const window = {};
+  vm.runInNewContext(source, { window, Number, Object });
+  const summary = window.WeatherInsights.summarizeHistory([
+    { tempf: null, humidity: "", windgustmph: undefined, dailyrainin: null }
+  ], (rows) => rows);
+  assert.equal(summary.averageTempf, null);
+  assert.equal(summary.minimumTempf, null);
+  assert.equal(summary.maximumTempf, null);
+  assert.equal(summary.averageHumidity, null);
+  assert.equal(summary.maximumGustMph, null);
+  assert.equal(summary.rainfallTotalIn, null);
+
+  const view = window.WeatherInsights.render({
+    analytics: { current: summary, previous: {}, rainfall: {} },
+    historyDate: "",
+    historyRangeDays: 1,
+    normalizeHistory: (rows) => rows,
+    history: [],
+    comparisonHistory: []
+  }, {
+    formatDateOnly: (value) => value,
+    formatSelectedDate: (value) => value,
+    formatTime: (value) => value,
+    formatUnitValue: (value, unit) => `${value}${unit}`,
+    rangeLabel: (days) => `Last ${days} day`
+  });
+  assert.match(view.summaryHtml, /Average temp<\/span><strong>--<\/strong>/);
+  assert.doesNotMatch(view.summaryHtml, /<strong>0(?:\.0)?°F<\/strong>/);
+});

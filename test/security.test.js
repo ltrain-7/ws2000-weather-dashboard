@@ -19,3 +19,9 @@ test("Socket.IO 2 uses the bounded local URL parser", () => {
   assert.equal(lock.packages["vendor/parseuri"].version, "2.0.0");
   assert.equal(lock.packages["node_modules/parseuri"].resolved, "vendor/parseuri");
 });
+
+test("the production dependency audit fails its workflow on findings", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/security.yml"), "utf8");
+  assert.match(workflow, /npm audit --omit=dev --audit-level=moderate/);
+  assert.doesNotMatch(workflow, /continue-on-error/);
+});

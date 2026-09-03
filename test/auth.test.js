@@ -35,7 +35,7 @@ test("scrypt password hashes are salted, portable, and timing-safe to verify", a
 
 test("administrator sessions expire and login attempts are rate limited", async () => {
   let now = 10_000;
-  const limiter = new LoginLimiter({ now: () => now, maxAttempts: 2, globalMaxAttempts: 10, windowMs: 60_000 });
+  const limiter = new LoginLimiter({ now: () => now, maxAttempts: 2, windowMs: 60_000 });
   const encoded = await hashPassword(testPassword, {
     N: 16384,
     r: 8,
@@ -56,12 +56,14 @@ test("administrator sessions expire and login attempts are rate limited", async 
   const secondFailure = await auth.authenticate("admin", "bad", "client-a");
   assert.equal(secondFailure.allowed, false);
   assert.equal((await auth.authenticate("admin", testPassword, "client-a")).reason, "rate-limited");
+  assert.equal((await auth.authenticate("admin", testPassword, "client-b")).ok, true);
 
   now += 60_001;
   const login = await auth.authenticate("admin", testPassword, "client-a");
   assert.equal(login.ok, true);
   assert.equal(auth.getSession(login.token).username, "admin");
   now += 5_001;
+  assert.deepEqual(auth.sweep(), { limiterEntries: 0, sessions: 0 });
   assert.equal(auth.getSession(login.token), null);
 });
 
@@ -150,6 +152,16 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   });
   assert.equal(authorizedApi.statusCode, 200, authorizedApi.body);
 
+  const staticAsset = await request(port, { path: "/styles.css" });
+  assert.equal(staticAsset.statusCode, 200);
+  assert.ok(staticAsset.headers["last-modified"]);
+  const unchangedAsset = await request(port, {
+    path: "/styles.css",
+    headers: { "if-modified-since": staticAsset.headers["last-modified"] }
+  });
+  assert.equal(unchangedAsset.statusCode, 304);
+  assert.equal(unchangedAsset.body, "");
+
   const missingCsrf = await request(port, {
     method: "POST",
     path: "/api/admin/integrity",
@@ -189,6 +201,38 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
     headers: { cookie, "x-forwarded-proto": "https" }
   });
   assert.equal(afterLogout.statusCode, 401);
+});
+
+test("trusted proxy mode refuses a non-loopback application exposure", async () => {
+  const child = spawn(process.execPath, ["--no-warnings", "src/server.js"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      HOST: "0.0.0.0",
+      PORT: "3000",
+      DASHBOARD_PORT: "3000",
+      CONTAINERIZED: "false",
+      ADMIN_TRUST_PROXY: "true",
+      ADMIN_AUTH_ENABLED: "false",
+      BACKUP_INTERVAL_HOURS: "0"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let logs = "";
+  child.stdout.on("data", (chunk) => { logs += chunk; });
+  child.stderr.on("data", (chunk) => { logs += chunk; });
+  const exitCode = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`Server did not reject unsafe proxy mode:\n${logs}`));
+    }, 5000);
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+  assert.notEqual(exitCode, 0);
+  assert.match(logs, /ADMIN_TRUST_PROXY requires HOST to be loopback/);
 });
 
 function jsonHeaders(host) {

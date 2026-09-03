@@ -23,7 +23,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 async function initializeAuthentication() {
   try {
     const status = await fetchJson("/api/auth/status");
-    if (status.enabled && !status.authenticated) {
+    if (status.enabled && (!status.authenticated || !status.csrfToken)) {
       window.location.replace("/login.html?next=%2Fadmin.html");
       return false;
     }
@@ -51,11 +51,11 @@ async function logout() {
 
 function bindActions() {
   refreshAdmin.addEventListener("click", () => loadStatus());
-  integrityBtn.addEventListener("click", () => runAction("/api/admin/integrity", "Database integrity check"));
-  backupBtn.addEventListener("click", () => runAction("/api/admin/backup", "Backup"));
+  integrityBtn.addEventListener("click", () => runAction("/api/admin/integrity", "Database integrity check", integrityBtn));
+  backupBtn.addEventListener("click", () => runAction("/api/admin/backup", "Backup", backupBtn));
   backfillBtn.addEventListener("click", () => {
     const days = Math.min(365, Math.max(1, Number(backfillDays.value) || 90));
-    runAction(`/api/admin/backfill?days=${days}`, `${days}-day backfill`);
+    runAction(`/api/admin/backfill?days=${days}`, `${days}-day backfill`, backfillBtn);
   });
 }
 
@@ -102,8 +102,7 @@ function renderRawPacket(payload) {
   adminRawTable.replaceChildren(fragment);
 }
 
-async function runAction(url, label) {
-  const button = url.includes("integrity") ? integrityBtn : url.includes("backup") ? backupBtn : backfillBtn;
+async function runAction(url, label, button) {
   setBusy(button, true);
   try {
     const result = await fetchJson(url, { method: "POST" });
