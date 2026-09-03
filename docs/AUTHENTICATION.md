@@ -40,7 +40,7 @@ ADMIN_TRUST_PROXY=true
 TLS_ENABLED=false
 ```
 
-Keep the single quotes around the hash because Compose otherwise interprets dollar signs. `ADMIN_TRUST_PROXY=true` is safe only when port 3000 is bound to `127.0.0.1` and DSM is the only path to the app.
+Keep the single quotes around the hash because Compose otherwise interprets dollar signs. `ADMIN_TRUST_PROXY=true` is safe only when port 3000 is bound to `127.0.0.1` and DSM is the only path to the app; the server now refuses to start when it detects an unsafe binding.
 
 Recreate the container:
 

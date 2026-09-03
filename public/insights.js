@@ -48,14 +48,17 @@
 
   function summarizeHistory(history, normalizeHistory) {
     const rows = normalizeHistory(history);
-    const values = (key) => rows.map((row) => Number(row[key])).filter(Number.isFinite);
+    const values = (key) => rows
+      .filter((row) => present(row[key]))
+      .map((row) => Number(row[key]))
+      .filter(Number.isFinite);
     const average = (items) => items.length
       ? items.reduce((sum, value) => sum + value, 0) / items.length
       : null;
     const maximum = (items) => items.length ? Math.max(...items) : null;
     const rain = values("dailyrainin");
     const temperatures = values("tempf");
-    const temperatureRows = rows.filter((row) => Number.isFinite(Number(row.tempf)));
+    const temperatureRows = rows.filter((row) => present(row.tempf) && Number.isFinite(Number(row.tempf)));
     const minimumTemperature = temperatureRows.reduce(
       (best, row) => (!best || Number(row.tempf) < Number(best.tempf) ? row : best),
       null
@@ -83,16 +86,20 @@
       && previous !== undefined
       && previous !== ""
       && Number.isFinite(previousNumber);
-    const rendered = Number.isFinite(numeric)
+    const rendered = present(value) && Number.isFinite(numeric)
       ? formatters.formatUnitValue(numeric, unit, unit === "in" ? 2 : 1)
       : "--";
     const details = [];
     if (occurredAt) details.push(`Observed ${formatters.formatTime(occurredAt)}`);
-    if (Number.isFinite(numeric) && hasPrevious) {
+    if (present(value) && Number.isFinite(numeric) && hasPrevious) {
       const difference = numeric - previousNumber;
       details.push(`${difference >= 0 ? "+" : ""}${formatters.formatUnitValue(difference, unit, unit === "in" ? 2 : 1)} vs previous`);
     }
     return `<div class="stat-card"><span>${label}</span><strong>${rendered}</strong>${details.map((detail) => `<small>${detail}</small>`).join("")}</div>`;
+  }
+
+  function present(value) {
+    return value !== null && value !== undefined && value !== "";
   }
 
   global.WeatherInsights = Object.freeze({ render, summarizeHistory });

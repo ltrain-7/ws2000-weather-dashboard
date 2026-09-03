@@ -59,6 +59,7 @@ test("forecast stays gracefully unavailable until a valid location exists", asyn
   let fetchCount = 0;
   const service = createForecastService({ fetchImpl: async () => { fetchCount += 1; } });
   assert.equal(locationFromDevice({ info: { coords: { coords: { lat: "", lon: "" } } } }), null);
+  assert.equal(locationFromDevice({ info: { coords: { coords: { lat: 0, lon: 0 } } } }), null);
   assert.deepEqual(await service.getForecast(), {
     enabled: true,
     available: false,
@@ -70,12 +71,14 @@ test("forecast stays gracefully unavailable until a valid location exists", asyn
 test("forecast returns its last successful result when the provider is temporarily unavailable", async () => {
   let clock = Date.parse("2026-09-03T12:00:00Z");
   let shouldFail = false;
+  let fetchCount = 0;
   const service = createForecastService({
     latitude: 40,
     longitude: -75,
     cacheTtlMs: 15 * 60 * 1000,
     now: () => clock,
     fetchImpl: async () => {
+      fetchCount += 1;
       if (shouldFail) throw new Error("temporary outage");
       return { ok: true, json: async () => providerPayload };
     }
@@ -88,6 +91,31 @@ test("forecast returns its last successful result when the provider is temporari
   assert.equal(fallback.stale, true);
   assert.equal(fallback.days.length, 2);
   assert.equal(service.status().lastError, "temporary outage");
+  const repeatedFallback = await service.getForecast();
+  assert.equal(repeatedFallback.stale, true);
+  assert.equal(fetchCount, 2);
+});
+
+test("forecast failures are throttled before the first successful response", async () => {
+  let clock = Date.parse("2026-09-03T12:00:00Z");
+  let fetchCount = 0;
+  const service = createForecastService({
+    latitude: 40,
+    longitude: -75,
+    failureBackoffMs: 15000,
+    now: () => clock,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      throw new Error("provider unavailable");
+    }
+  });
+  await assert.rejects(service.getForecast(), /provider unavailable/);
+  await assert.rejects(service.getForecast(), /temporarily delayed/);
+  assert.equal(fetchCount, 1);
+  assert.ok(service.status().retryAt);
+  clock += 15001;
+  await assert.rejects(service.getForecast(), /provider unavailable/);
+  assert.equal(fetchCount, 2);
 });
 
 test("forecast cards convert weather codes into concise accessible labels", () => {

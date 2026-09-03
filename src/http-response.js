@@ -59,7 +59,7 @@ function createHttpResponder(options) {
     res.end();
   }
 
-  async function serveStatic(requestUrl, res) {
+  async function serveStatic(requestUrl, res, requestHeaders = {}) {
     const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
     let decodedPath;
     try {
@@ -71,6 +71,8 @@ function createHttpResponder(options) {
 
     const filePath = path.normalize(path.join(publicDir, decodedPath));
     const relativePath = path.relative(publicDir, filePath);
+    // If public/ ever becomes runtime-writable, replace this lexical containment
+    // check with realpath-based containment so symlink targets cannot escape it.
     if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
       sendText(res, 403, "Forbidden.");
       return;
@@ -90,10 +92,21 @@ function createHttpResponder(options) {
 
     const contentType = MIME_TYPES.get(path.extname(filePath)) || "application/octet-stream";
     const sensitiveAsset = ["/admin.html", "/admin.js", "/login.html", "/login.js"].includes(decodedPath);
+    const lastModified = stats.mtime.toUTCString();
+    const responseHeaders = {
+      "cache-control": sensitiveAsset ? "no-store" : "no-cache, must-revalidate",
+      "last-modified": lastModified,
+      ...securityHeaders()
+    };
+    const ifModifiedSince = Date.parse(String(requestHeaders["if-modified-since"] || ""));
+    if (!sensitiveAsset && Number.isFinite(ifModifiedSince) && stats.mtimeMs <= ifModifiedSince + 999) {
+      res.writeHead(304, responseHeaders);
+      res.end();
+      return;
+    }
     res.writeHead(200, {
       "content-type": contentType,
-      "cache-control": sensitiveAsset ? "no-store" : "no-cache, must-revalidate",
-      ...securityHeaders()
+      ...responseHeaders
     });
     fs.createReadStream(filePath).pipe(res);
   }

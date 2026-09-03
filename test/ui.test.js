@@ -30,6 +30,9 @@ test("administrator login is accessible and authenticated actions carry CSRF pro
   assert.match(adminScript, /Container image/);
   assert.match(adminScript, /Last deployment/);
   assert.match(adminScript, /Deployment backup/);
+  assert.match(adminScript, /!status\.csrfToken/);
+  assert.match(adminScript, /runAction\(url, label, button\)/);
+  assert.doesNotMatch(adminScript, /url\.includes\("integrity"\)/);
   assert.match(worker, /startsWith\("\/api\/admin"\)/);
   assert.match(worker, /startsWith\("\/api\/auth"\)/);
   assert.doesNotMatch(worker.split("\n")[1], /admin|login/);
@@ -65,6 +68,8 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(insights, /Observed/);
   assert.match(script, /updateViaCache: "none"/);
   assert.match(script, /Partial range:/);
+  assert.match(script, /Still reconnecting/);
+  assert.match(script, /function hasNumericValue/);
   assert.match(historyTime, /zonedTimeToUtc/);
   assert.match(worker, /event\.request\.mode === "navigate"/);
   assert.match(styles, /:focus-visible/);
@@ -101,4 +106,6 @@ test("release version and service-worker assets stay synchronized", () => {
 test("compose reports its configured image to Administration", () => {
   const compose = read("docker-compose.yml");
   assert.match(compose, /APP_IMAGE:.*WS2000_IMAGE/);
+  assert.match(compose, /scripts\/healthcheck\.js/);
+  assert.doesNotMatch(compose, /node -e/);
 });

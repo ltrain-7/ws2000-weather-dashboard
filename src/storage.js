@@ -337,8 +337,11 @@ class WeatherStore {
   getHistory(macAddress, options = {}) {
     if (!macAddress) return [];
     const limit = clamp(Number(options.limit || 288), 1, 10000);
-    const startDate = options.startDate ? normalizeDateutc({ dateutc: options.startDate }) : null;
-    const endDate = options.endDate ? normalizeDateutc({ dateutc: options.endDate }) : null;
+    const startDate = options.startDate ? requireDateutc(options.startDate, "startDate") : null;
+    const endDate = options.endDate ? requireDateutc(options.endDate, "endDate") : null;
+    if (startDate && endDate && startDate > endDate) {
+      throw clientError("startDate must not be later than endDate.");
+    }
     const maxPoints = clamp(Number(options.maxPoints || 0), 0, 2000);
     if (maxPoints >= 2 && (startDate || endDate)) {
       return this.statements.sampledHistory
@@ -392,8 +395,9 @@ class WeatherStore {
 
   getAnalytics(macAddress, startDate, endDate) {
     if (!macAddress) return emptyAnalytics();
-    const start = normalizeDateutc({ dateutc: startDate });
-    const end = normalizeDateutc({ dateutc: endDate });
+    const start = requireDateutc(startDate, "startDate");
+    const end = requireDateutc(endDate, "endDate");
+    if (start >= end) throw clientError("startDate must be earlier than endDate.");
     const summary = this.statements.periodSummary.get(macAddress, start, end);
     const minimumTemperature = this.statements.minimumTemperature.get(macAddress, start, end);
     const maximumTemperature = this.statements.maximumTemperature.get(macAddress, start, end);
@@ -449,6 +453,8 @@ class WeatherStore {
     if (fs.existsSync(backupPath)) {
       throw new Error("Backup destination already exists.");
     }
+    // SQLite does not allow binding VACUUM INTO's filename. backupPath is generated
+    // exclusively by the server; retain SQL quote escaping if that ever changes.
     const escapedPath = String(backupPath).replaceAll("'", "''");
     this.db.exec(`VACUUM INTO '${escapedPath}'`);
     const integrity = verifyDatabaseFile(backupPath);
@@ -479,13 +485,29 @@ function createWeatherStore(options) {
 }
 
 function normalizeDateutc(data) {
+  const parsed = parseDateutc(data);
+  return parsed === null ? Date.now() : parsed;
+}
+
+function requireDateutc(value, name) {
+  const parsed = parseDateutc({ dateutc: value });
+  if (parsed === null) throw clientError(`${name} must be a valid date or timestamp.`);
+  return parsed;
+}
+
+function parseDateutc(data) {
   const direct = Number(data.dateutc);
   if (Number.isFinite(direct) && direct > 0) return direct;
 
   const parsed = Date.parse(data.dateutc || data.date || data.observed_at || data.created_at || "");
   if (Number.isFinite(parsed)) return parsed;
+  return null;
+}
 
-  return Date.now();
+function clientError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
 }
 
 function numberOrNull(value) {
