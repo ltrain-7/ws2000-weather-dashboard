@@ -13,7 +13,10 @@ const state = {
   comparePrevious: localStorage.getItem("comparePrevious") === "true",
   insightTab: localStorage.getItem("insightTab") || "summary",
   historyLoading: false,
-  historyError: ""
+  historyError: "",
+  forecast: null,
+  forecastLoading: false,
+  forecastRetries: 0
 };
 const historyTime = window.WeatherHistoryTime;
 
@@ -48,6 +51,10 @@ const els = {
   compass: document.getElementById("compass"),
   compassNeedle: document.getElementById("compassNeedle"),
   moreConditions: document.getElementById("moreConditions"),
+  forecastSection: document.getElementById("forecastSection"),
+  forecastTitle: document.getElementById("forecastTitle"),
+  forecastStatus: document.getElementById("forecastStatus"),
+  forecastGrid: document.getElementById("forecastGrid"),
   chartTitle: document.getElementById("chartTitle"),
   historyOptions: document.getElementById("historyOptions"),
   historyDate: document.getElementById("historyDate"),
@@ -89,7 +96,7 @@ async function init() {
     const latest = await fetchJson("/api/latest");
     applyState(latest);
     connectEventStream();
-    await loadHistory();
+    await Promise.all([loadHistory(), loadForecast()]);
     registerServiceWorker();
   } catch (error) {
     setStatus("error", "Offline");
@@ -112,7 +119,7 @@ function bindEvents() {
     try {
       const latest = await fetchJson("/api/refresh", { method: "POST" });
       applyState(latest);
-      await loadHistory();
+      await Promise.all([loadHistory(), loadForecast()]);
     } catch (error) {
       els.healthDetail.textContent = error.message;
     } finally {
@@ -168,6 +175,81 @@ function bindEvents() {
     hideChartTooltip();
     drawChart();
   });
+}
+
+async function loadForecast() {
+  if (state.forecastLoading || state.config?.forecastEnabled === false) return;
+  state.forecastLoading = true;
+  try {
+    state.forecast = await fetchJson("/api/forecast");
+    renderForecast();
+    if (state.forecast.enabled && !state.forecast.available && state.forecast.reason === "location-unavailable" && state.forecastRetries < 3) {
+      state.forecastRetries += 1;
+      window.setTimeout(loadForecast, state.forecastRetries * 5000);
+    } else if (state.forecast.available) {
+      state.forecastRetries = 0;
+    }
+  } catch {
+    state.forecast = { enabled: true, available: false, reason: "provider-unavailable" };
+    renderForecast();
+  } finally {
+    state.forecastLoading = false;
+  }
+}
+
+function renderForecast() {
+  const forecast = state.forecast;
+  if (!forecast?.enabled) {
+    els.forecastSection.hidden = true;
+    return;
+  }
+  els.forecastSection.hidden = false;
+  if (!forecast.available) {
+    els.forecastTitle.textContent = "Local outlook";
+    els.forecastStatus.textContent = forecast.reason === "location-unavailable"
+      ? "Waiting for station location…"
+      : "Forecast temporarily unavailable";
+    els.forecastGrid.replaceChildren();
+    return;
+  }
+
+  els.forecastTitle.textContent = forecast.locationName || "Local outlook";
+  els.forecastStatus.textContent = `${forecast.stale ? "Last forecast" : "Updated"} ${formatTime(forecast.updatedAt)}`;
+  const fragment = document.createDocumentFragment();
+  for (const [index, day] of (forecast.days || []).entries()) {
+    const view = window.WeatherForecast.cardView(day, index);
+    const card = document.createElement("article");
+    card.className = "forecast-card";
+    card.setAttribute("aria-label", view.accessibleLabel);
+
+    const heading = document.createElement("div");
+    heading.className = "forecast-card-heading";
+    const dayName = document.createElement("strong");
+    dayName.textContent = view.dayLabel;
+    const date = document.createElement("span");
+    date.textContent = view.dateLabel;
+    heading.append(dayName, date);
+
+    const condition = document.createElement("div");
+    condition.className = "forecast-condition";
+    const icon = document.createElement("span");
+    icon.className = "forecast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = view.icon;
+    const description = document.createElement("span");
+    description.textContent = view.condition;
+    condition.append(icon, description);
+
+    const temperatures = document.createElement("p");
+    temperatures.className = "forecast-temperatures";
+    temperatures.textContent = `${view.high} / ${view.low}`;
+    const details = document.createElement("p");
+    details.className = "forecast-details";
+    details.textContent = `${view.rain} · ${view.gust}`;
+    card.append(heading, condition, temperatures, details);
+    fragment.append(card);
+  }
+  els.forecastGrid.replaceChildren(fragment);
 }
 
 function connectEventStream() {
@@ -227,6 +309,9 @@ function applyState(payload) {
 
   renderStationOptions();
   render();
+  if (state.config?.forecastEnabled && state.forecast?.reason === "location-unavailable" && !state.forecastLoading) {
+    window.setTimeout(loadForecast, 0);
+  }
 }
 
 async function loadHistory() {

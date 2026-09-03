@@ -9,7 +9,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <link rel="stylesheet" href="/styles.css?v=1.8.0">
+    <link rel="stylesheet" href="/styles.css?v=1.9.0">
   </head>
   <body>
     <main class="app-shell">
@@ -84,6 +84,15 @@
         </div>
       </details>
 
+      <section id="forecastSection" class="forecast-section" aria-labelledby="forecastTitle" hidden>
+        <div class="forecast-header">
+          <div><p class="eyebrow">Forecast</p><h2 id="forecastTitle">Local outlook</h2></div>
+          <p id="forecastStatus" class="forecast-status" aria-live="polite">Loading forecast…</p>
+        </div>
+        <div id="forecastGrid" class="forecast-grid" aria-live="polite"></div>
+        <p class="forecast-attribution"><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Weather data by Open-Meteo</a></p>
+      </section>
+
       <section class="chart-section">
         <div class="history-header">
           <div class="history-heading"><p class="eyebrow">History</p><h2 id="chartTitle">Latest readings</h2></div>
@@ -155,8 +164,9 @@
         </article>
       </section>
     </main>
-    <script src="/history-time.js?v=1.8.0" defer></script>
-    <script src="/insights.js?v=1.8.0" defer></script>
-    <script src="/app.js?v=1.8.0" defer></script>
+    <script src="/history-time.js?v=1.9.0" defer></script>
+    <script src="/insights.js?v=1.9.0" defer></script>
+    <script src="/forecast.js?v=1.9.0" defer></script>
+    <script src="/app.js?v=1.9.0" defer></script>
   </body>
 </html>

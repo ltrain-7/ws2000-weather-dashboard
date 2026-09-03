@@ -42,6 +42,7 @@ test("dashboard controls retain accessible interaction states", () => {
   const script = read("public/app.js");
   const historyTime = read("public/history-time.js");
   const insights = read("public/insights.js");
+  const forecast = read("public/forecast.js");
   const styles = read("public/styles.css");
   const worker = read("public/service-worker.js");
 
@@ -52,6 +53,9 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(dashboard, /id="updateBanner"/);
   assert.match(dashboard, /aria-describedby="chartSummary chartMessage"/);
   assert.match(dashboard, /id="chartDataTable"/);
+  assert.match(dashboard, /id="forecastSection"[^>]*aria-labelledby="forecastTitle"/);
+  assert.match(dashboard, /Weather data by Open-Meteo/);
+  assert.match(forecast, /accessibleLabel/);
   assert.match(script, /addEventListener\("keydown"/);
   assert.match(script, /setAttribute\("aria-selected"/);
   assert.match(script, /max-height: 900px/);
@@ -79,6 +83,7 @@ test("release version and service-worker assets stay synchronized", () => {
   assert.match(dashboard, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(dashboard, new RegExp(`history-time\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`insights\\.js\\?v=${version}`));
+  assert.match(dashboard, new RegExp(`forecast\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`app\\.js\\?v=${version}`));
   assert.match(admin, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(admin, new RegExp(`admin\\.js\\?v=${version}`));
@@ -88,6 +93,7 @@ test("release version and service-worker assets stay synchronized", () => {
   assert.match(worker, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(worker, new RegExp(`history-time\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`insights\\.js\\?v=${version}`));
+  assert.match(worker, new RegExp(`forecast\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`app\\.js\\?v=${version}`));
   assert.doesNotMatch(worker, new RegExp(`(?:admin|login)\\.js\\?v=${version}`));
 });

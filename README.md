@@ -1,6 +1,6 @@
 # Portable WS-2000 Weather Dashboard
 
-A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides daily plus 7/30/90/180-day trend charts.
+A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps API keys on the server, receives live observations, stores history in SQLite, and provides a local forecast plus daily and 7/30/90/180-day trend charts.
 
 It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and optional built-in authentication for its private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, includes chart tooltips plus an accessible data table, and records when period high and low temperatures occurred.
 
@@ -43,6 +43,8 @@ The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspber
    ```
 
 6. Open `http://RASPBERRY-PI-IP:3000`.
+
+The local forecast is enabled automatically and normally uses the station location supplied privately by Ambient Weather. The server sends those coordinates to Open-Meteo to request the forecast, but never exposes them to the browser. If your station metadata has no location, set `FORECAST_LATITUDE` and `FORECAST_LONGITUDE` in `.env`.
 
 Open `/admin.html` to view application, deployment, connection, station, storage, backup, and backfill status. A deployment performed by the guarded updater records the exact image digest, revision, and successful update time. The page never returns Ambient API key values.
 
@@ -226,6 +228,11 @@ docker compose up -d
 | `BACKUP_INTERVAL_HOURS` | Hours between verified SQLite backups; `0` disables scheduling |
 | `BACKUP_RETENTION_DAYS` | Maximum age of application-created backups; `0` disables age pruning |
 | `BACKUP_MAX_FILES` | Maximum application-created backups retained; `0` disables count pruning |
+| `FORECAST_ENABLED` | Enables the local forecast; defaults to `true` |
+| `FORECAST_DAYS` | Number of daily forecast cards; accepts 3 through 7 and defaults to 5 |
+| `FORECAST_REFRESH_MINUTES` | Server forecast cache duration; accepts 15 through 360 and defaults to 60 |
+| `FORECAST_LATITUDE`, `FORECAST_LONGITUDE` | Optional server-only location override when station metadata has no coordinates |
+| `FORECAST_LOCATION_NAME` | Optional friendly forecast location name |
 | `ADMIN_AUTH_ENABLED` | Protects the administration page and APIs; defaults to `false` |
 | `ADMIN_USERNAME` | Administrator username; defaults to `admin` |
 | `ADMIN_PASSWORD_HASH` | Quoted scrypt hash produced by `npm run auth:hash` |
@@ -345,6 +352,9 @@ docker compose logs --tail=100 ws2000-dashboard
 - `GET /api/health`
 - `GET /api/config`
 - `GET /api/latest`
+- `GET /api/forecast`
 - `GET /api/history`
 - `GET /api/storage`
 - `GET /api/events`
+
+Forecast data is provided by [Open-Meteo](https://open-meteo.com/). Review its attribution and usage terms before using the dashboard commercially or at high request volume. The built-in server cache minimizes external requests and can serve the last successful forecast during a temporary provider outage.

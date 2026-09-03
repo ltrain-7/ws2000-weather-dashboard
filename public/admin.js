@@ -123,6 +123,7 @@ function renderStatus(status) {
   const backups = status.backups || {};
   const health = status.stationHealth?.[0];
   const backfill = status.backfill || {};
+  const forecast = status.forecast || {};
   const cards = [
     ["Version", app.version || "--", `${shortRevision(app.revision)} · Node ${app.nodeVersion || "--"}`],
     ["Container image", shortImage(deployment.image), shortDigest(deployment.digest)],
@@ -130,6 +131,7 @@ function renderStatus(status) {
     ["Uptime", duration(app.uptimeSeconds), `Started ${formatDate(app.startedAt)}`],
     ["Station", health?.status || "No reading", health ? `${health.ageMinutes} minutes old` : "Waiting for data"],
     ["Realtime", status.connections?.realtime?.status || "--", status.connections?.realtime?.message || ""],
+    ["Forecast", forecast.enabled ? (forecast.available ? "Ready" : "Waiting for location") : "Disabled", forecast.lastUpdatedAt ? `Updated ${formatDate(forecast.lastUpdatedAt)}` : (forecast.locationName || "No forecast fetched yet")],
     ["Stored readings", number(storage.readingCount), `${formatDate(storage.firstReadingAt)} to ${formatDate(storage.latestReadingAt)}`],
     ["Database", bytes(storage.databaseBytes), storage.integrity?.ok ? "Integrity OK" : `Integrity: ${storage.integrity?.result || "unknown"}`],
     ["Backups", number(backups.files?.length), backups.enabled ? `Every ${backups.intervalHours} hours` : "Automatic backups disabled"],

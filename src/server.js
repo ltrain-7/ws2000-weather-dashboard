@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { AdminAuth } = require("./auth");
 const { createDeploymentStatus } = require("./deployment-status");
+const { createForecastService } = require("./forecast");
 const { createHttpResponder } = require("./http-response");
 const { createWeatherStore } = require("./storage");
 
@@ -52,6 +53,9 @@ const BACKUP_INTERVAL_HOURS = clamp(numberFromEnv("BACKUP_INTERVAL_HOURS", 24), 
 const BACKUP_RETENTION_DAYS = clamp(numberFromEnv("BACKUP_RETENTION_DAYS", 90), 0, 3650);
 const BACKUP_MAX_FILES = clamp(numberFromEnv("BACKUP_MAX_FILES", 12), 0, 1000);
 const STATION_STALE_MINUTES = clamp(numberFromEnv("STATION_STALE_MINUTES", 15), 2, 1440);
+const FORECAST_ENABLED = booleanFromEnv("FORECAST_ENABLED", true);
+const FORECAST_DAYS = clamp(numberFromEnv("FORECAST_DAYS", 5), 3, 7);
+const FORECAST_REFRESH_MINUTES = clamp(numberFromEnv("FORECAST_REFRESH_MINUTES", 60), 15, 360);
 const ADMIN_COOKIE_NAME = "__Host-weather_session";
 const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
 const { redirect, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
@@ -88,6 +92,16 @@ const deploymentStatus = createDeploymentStatus({
     || path.join(path.dirname(SQLITE_DB_PATH), "deployment.json"),
   packageInfo: PACKAGE,
   startedAt: STARTED_AT
+});
+const forecastService = createForecastService({
+  enabled: FORECAST_ENABLED,
+  latitude: clean(process.env.FORECAST_LATITUDE),
+  longitude: clean(process.env.FORECAST_LONGITUDE),
+  locationName: clean(process.env.FORECAST_LOCATION_NAME),
+  timezone: STATION_TIMEZONE,
+  days: FORECAST_DAYS,
+  cacheTtlMs: FORECAST_REFRESH_MINUTES * 60 * 1000,
+  origin: clean(process.env.FORECAST_ORIGIN) || undefined
 });
 
 const state = {
@@ -233,7 +247,8 @@ async function handleApi(req, res, requestUrl) {
       deviceCount: devicesByMac.size,
       realtime: state.realtime.status,
       rest: state.rest.status,
-      storage: storage.getStatus()
+      storage: storage.getStatus(),
+      forecast: forecastService.status()
     });
     return;
   }
@@ -252,6 +267,8 @@ async function handleApi(req, res, requestUrl) {
       stationTimezone: STATION_TIMEZONE,
       tlsEnabled: TLS_ENABLED,
       adminAuthEnabled: ADMIN_AUTH_ENABLED,
+      forecastEnabled: FORECAST_ENABLED,
+      forecastDays: FORECAST_DAYS,
       stationStaleMinutes: STATION_STALE_MINUTES,
       storage: storage.getStatus()
     });
@@ -260,6 +277,20 @@ async function handleApi(req, res, requestUrl) {
 
   if (req.method === "GET" && requestUrl.pathname === "/api/storage") {
     sendJson(res, 200, storage.getStats());
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/forecast") {
+    try {
+      sendJson(res, 200, await forecastService.getForecast());
+    } catch (error) {
+      recordError(error);
+      sendJson(res, 502, {
+        ...forecastService.status(),
+        available: false,
+        error: "Local forecast is temporarily unavailable."
+      });
+    }
     return;
   }
 
@@ -575,6 +606,8 @@ async function fetchJson(url) {
 function upsertDevice(device) {
   if (!device || !device.macAddress) return;
 
+  forecastService.useDevice(device);
+
   const existing = devicesByMac.get(device.macAddress) || {};
   const merged = {
     ...existing,
@@ -747,6 +780,7 @@ function adminStatus() {
       adminAuthEnabled: ADMIN_AUTH_ENABLED
     },
     deployment,
+    forecast: forecastService.status(),
     configured,
     connections: { rest: state.rest, realtime: state.realtime },
     stationHealth: stationHealth(),
