@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "parseuri": "file:vendor/parseuri",
-    "socket.io-client": "2.5.0"
+    "socket.io-client": "4.8.3"
   },
   "_parseuriOverrideReason": "Keep Socket.IO 2 compatible while forcing its transitive parseuri dependency to use the maintained local replacement above.",
   "overrides": {
