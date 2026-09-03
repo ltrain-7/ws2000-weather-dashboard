@@ -51,7 +51,8 @@ async function testDashboardInteractions(browser) {
         configured: true,
         historyLimit: 96,
         historyMaxPoints: 480,
-        stationTimezone: "America/New_York"
+        stationTimezone: "America/New_York",
+        forecastEnabled: true
       });
     }
     if (url.pathname === "/api/latest") {
@@ -63,6 +64,18 @@ async function testDashboardInteractions(browser) {
         stationHealth: [{ macAddress: stationMac, status: "online", batteryLow: false }],
         realtime: { status: "live" },
         rest: { status: "ok" }
+      });
+    }
+    if (url.pathname === "/api/forecast") {
+      return json(route, {
+        enabled: true,
+        available: true,
+        locationName: "Browser Test Station",
+        updatedAt: new Date(now).toISOString(),
+        days: [
+          { date: "2026-09-03", weatherCode: 2, highF: 78, lowF: 61, precipitationProbability: 42, maximumGustMph: 12 },
+          { date: "2026-09-04", weatherCode: 61, highF: 74, lowF: 58, precipitationProbability: 60, maximumGustMph: 18 }
+        ]
       });
     }
     if (url.pathname === "/api/history") {
@@ -108,6 +121,8 @@ async function testDashboardInteractions(browser) {
   });
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "Browser Test Station", exact: true }).waitFor();
+  assert.match(await page.locator("#forecastGrid").innerText(), /Today[\s\S]*Partly cloudy[\s\S]*78° \/ 61°[\s\S]*42% rain/);
   await page.getByRole("button", { name: "1D", exact: true }).click();
   await page.getByRole("heading", { name: "Last 1 day", exact: true }).waitFor();
 
