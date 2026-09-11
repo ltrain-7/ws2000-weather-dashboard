@@ -336,7 +336,7 @@ class WeatherStore {
 
   getHistory(macAddress, options = {}) {
     if (!macAddress) return [];
-    const limit = clamp(Number(options.limit || 288), 1, 10000);
+    const limit = clamp(Number(options.limit || 288), 1, 2000);
     const startDate = options.startDate ? requireDateutc(options.startDate, "startDate") : null;
     const endDate = options.endDate ? requireDateutc(options.endDate, "endDate") : null;
     if (startDate && endDate && startDate > endDate) {

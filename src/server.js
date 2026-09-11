@@ -44,6 +44,7 @@ const POLL_INTERVAL_MS = clamp(
 );
 const HISTORY_LIMIT = clamp(numberFromEnv("AMBIENT_HISTORY_LIMIT", 96), 1, 288);
 const HISTORY_MAX_POINTS = clamp(numberFromEnv("HISTORY_MAX_POINTS", 480), 120, 2000);
+const HISTORY_QUERY_LIMIT = 2000;
 const LIVE_HISTORY_LIMIT = clamp(numberFromEnv("LIVE_HISTORY_LIMIT", 192), 24, 288);
 const HISTORY_RETENTION_DAYS = clamp(numberFromEnv("HISTORY_RETENTION_DAYS", 365), 0, 3650);
 const SQLITE_DB_PATH =
@@ -56,6 +57,17 @@ const STATION_STALE_MINUTES = clamp(numberFromEnv("STATION_STALE_MINUTES", 15), 
 const FORECAST_ENABLED = booleanFromEnv("FORECAST_ENABLED", true);
 const FORECAST_DAYS = clamp(numberFromEnv("FORECAST_DAYS", 5), 3, 7);
 const FORECAST_REFRESH_MINUTES = clamp(numberFromEnv("FORECAST_REFRESH_MINUTES", 60), 15, 360);
+const PUBLIC_REFRESH_COOLDOWN_MS = clamp(
+  numberFromEnv("PUBLIC_REFRESH_COOLDOWN_MS", 30000),
+  5000,
+  5 * 60 * 1000
+);
+const MAX_EVENT_CLIENTS = clamp(numberFromEnv("MAX_EVENT_CLIENTS", 64), 1, 1000);
+const MAX_EVENT_CLIENTS_PER_ADDRESS = clamp(
+  numberFromEnv("MAX_EVENT_CLIENTS_PER_ADDRESS", 6),
+  1,
+  100
+);
 const ADMIN_COOKIE_NAME = "__Host-weather_session";
 const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
 const { redirect, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
@@ -84,6 +96,8 @@ authCleanupTimer?.unref();
 
 const configured = Boolean(APPLICATION_KEY && API_KEYS.length);
 const clients = new Set();
+let manualRefreshPromise = null;
+let lastManualRefreshAt = 0;
 const devicesByMac = new Map();
 const latestByMac = new Map();
 const apiKeyByMac = new Map();
@@ -241,7 +255,11 @@ async function handleApi(req, res, requestUrl) {
   }
 
   let authenticatedAdmin = null;
-  if (requestUrl.pathname === "/api/admin" || requestUrl.pathname.startsWith("/api/admin/")) {
+  if (
+    requestUrl.pathname === "/api/storage"
+    || requestUrl.pathname === "/api/admin"
+    || requestUrl.pathname.startsWith("/api/admin/")
+  ) {
     authenticatedAdmin = requireAdminSession(req, res);
     if (!authenticatedAdmin) return;
   }
@@ -262,21 +280,10 @@ async function handleApi(req, res, requestUrl) {
   if (req.method === "GET" && requestUrl.pathname === "/api/config") {
     sendJson(res, 200, {
       configured,
-      hasApplicationKey: Boolean(APPLICATION_KEY),
-      apiKeyCount: API_KEYS.length,
-      defaultDeviceMac: DEFAULT_DEVICE_MAC || null,
-      pollIntervalMs: POLL_INTERVAL_MS,
       historyLimit: HISTORY_LIMIT,
       historyMaxPoints: HISTORY_MAX_POINTS,
-      liveHistoryLimit: LIVE_HISTORY_LIMIT,
-      historyRetentionDays: HISTORY_RETENTION_DAYS,
       stationTimezone: STATION_TIMEZONE,
-      tlsEnabled: TLS_ENABLED,
-      adminAuthEnabled: ADMIN_AUTH_ENABLED,
-      forecastEnabled: FORECAST_ENABLED,
-      forecastDays: FORECAST_DAYS,
-      stationStaleMinutes: STATION_STALE_MINUTES,
-      storage: storage.getStatus()
+      forecastEnabled: FORECAST_ENABLED
     });
     return;
   }
@@ -350,18 +357,20 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (req.method === "GET" && requestUrl.pathname === "/api/devices") {
-    if (requestUrl.searchParams.get("refresh") === "1") {
-      await refreshDevices("manual");
-    }
     sendJson(res, 200, { devices: publicDevices() });
     return;
   }
 
-  if (
-    (req.method === "POST" || req.method === "GET") &&
-    requestUrl.pathname === "/api/refresh"
-  ) {
-    await refreshDevices("manual");
+  if (requestUrl.pathname === "/api/refresh") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed." }, { allow: "POST" });
+      return;
+    }
+    if (!isSameOriginRequest(req)) {
+      sendJson(res, 403, { error: "Cross-origin refresh requests are not allowed." });
+      return;
+    }
+    await refreshDevicesManually();
     sendJson(res, 200, publicState());
     return;
   }
@@ -375,14 +384,22 @@ async function handleApi(req, res, requestUrl) {
 }
 
 async function handleHistory(res, requestUrl) {
-  const macAddress =
-    clean(requestUrl.searchParams.get("mac")) || DEFAULT_DEVICE_MAC || firstKnownMac();
+  const requestedMac = clean(requestUrl.searchParams.get("mac"));
+  const macAddress = requestedMac || DEFAULT_DEVICE_MAC || firstKnownMac();
   if (!macAddress) {
     sendJson(res, 400, { error: "No weather station is available yet." });
     return;
   }
+  if (requestedMac && !knownStationMac(requestedMac)) {
+    sendJson(res, 400, { error: "Unknown weather station." });
+    return;
+  }
 
-  const limit = clamp(Number(requestUrl.searchParams.get("limit") || HISTORY_LIMIT), 1, 10000);
+  const limit = clamp(
+    Number(requestUrl.searchParams.get("limit") || HISTORY_LIMIT),
+    1,
+    HISTORY_QUERY_LIMIT
+  );
   const endDate = historyDateParameter(requestUrl, "endDate");
   const startDate = historyDateParameter(requestUrl, "startDate");
   if (startDate && endDate && Date.parse(startDate) > Date.parse(endDate)) {
@@ -436,12 +453,24 @@ async function handleHistory(res, requestUrl) {
     recordError(error);
     sendJson(res, localHistory.length ? 200 : 502, {
       error: "Unable to fetch Ambient device history.",
-      detail: error.message,
       source: storage.enabled ? "sqlite-fallback" : "memory-fallback",
       count: localHistory.length,
       data: localHistory,
       fallback: liveHistoryFor(macAddress)
     });
+  }
+}
+
+async function refreshDevicesManually() {
+  if (manualRefreshPromise) return manualRefreshPromise;
+  const now = Date.now();
+  if (now - lastManualRefreshAt < PUBLIC_REFRESH_COOLDOWN_MS) return [];
+  lastManualRefreshAt = now;
+  manualRefreshPromise = refreshDevices("manual");
+  try {
+    return await manualRefreshPromise;
+  } finally {
+    manualRefreshPromise = null;
   }
 }
 
@@ -714,13 +743,18 @@ function publicState() {
     configured,
     generatedAt: new Date().toISOString(),
     targetMac: DEFAULT_DEVICE_MAC || null,
-    rest: state.rest,
-    realtime: state.realtime,
-    storage: storage.getStatus(),
+    rest: publicConnectionState(state.rest, "lastSync"),
+    realtime: publicConnectionState(state.realtime, "lastEvent"),
     devices: publicDevices(),
     latest: Array.from(latestByMac.values()).filter(Boolean),
-    stationHealth: stationHealth(),
-    errors: state.errors.slice(-5)
+    stationHealth: stationHealth()
+  };
+}
+
+function publicConnectionState(connection, timestampName) {
+  return {
+    status: connection.status,
+    [timestampName]: connection[timestampName] || null
   };
 }
 
@@ -956,12 +990,12 @@ function clearSessionCookie() {
 function isRequestSecure(req) {
   if (TLS_ENABLED || req.socket.encrypted) return true;
   if (!ADMIN_TRUST_PROXY) return false;
-  return clean(req.headers["x-forwarded-proto"]).split(",")[0].toLowerCase() === "https";
+  return forwardedHeader(req, "x-forwarded-proto").toLowerCase() === "https";
 }
 
 function clientAddress(req) {
   if (ADMIN_TRUST_PROXY) {
-    const forwarded = clean(req.headers["x-forwarded-for"]).split(",")[0];
+    const forwarded = forwardedHeader(req, "x-forwarded-for");
     if (forwarded) return forwarded;
   }
   return req.socket.remoteAddress || "unknown";
@@ -989,17 +1023,29 @@ async function readJsonBody(req, maximumBytes) {
   }
 }
 
-function isSameOriginAdminRequest(req) {
+function isSameOriginRequest(req) {
   const fetchSite = clean(req.headers["sec-fetch-site"]).toLowerCase();
   if (fetchSite) return fetchSite === "same-origin";
   const origin = clean(req.headers.origin);
   if (!origin) return true;
   try {
-    const forwardedHost = clean(req.headers["x-forwarded-host"]).split(",")[0];
+    const forwardedHost = ADMIN_TRUST_PROXY ? forwardedHeader(req, "x-forwarded-host") : "";
     return new URL(origin).host === (forwardedHost || req.headers.host);
   } catch {
     return false;
   }
+}
+
+function isSameOriginAdminRequest(req) {
+  return isSameOriginRequest(req);
+}
+
+function forwardedHeader(req, name) {
+  return clean(req.headers[name])
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .at(-1) || "";
 }
 
 async function runBackup(reason) {
@@ -1066,6 +1112,12 @@ async function runBackfill(macAddress, days) {
 
 function publicDevices() {
   return Array.from(devicesByMac.values()).filter(Boolean);
+}
+
+function knownStationMac(macAddress) {
+  return macAddress === DEFAULT_DEVICE_MAC
+    || devicesByMac.has(macAddress)
+    || apiKeyByMac.has(macAddress);
 }
 
 function firstKnownMac() {
@@ -1138,6 +1190,19 @@ function persistReading(reading, source) {
 }
 
 function openEventStream(req, res) {
+  const address = clientAddress(req);
+  const addressClients = Array.from(clients)
+    .filter((client) => client.address === address)
+    .length;
+  if (clients.size >= MAX_EVENT_CLIENTS || addressClients >= MAX_EVENT_CLIENTS_PER_ADDRESS) {
+    sendJson(
+      res,
+      503,
+      { error: "Too many live-update connections." },
+      { "cache-control": "no-store", "retry-after": "30" }
+    );
+    return;
+  }
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
@@ -1147,7 +1212,7 @@ function openEventStream(req, res) {
   });
   res.write(": connected\n\n");
 
-  const client = { res };
+  const client = { address, res };
   clients.add(client);
   sendEvent(client, "state", publicState());
 

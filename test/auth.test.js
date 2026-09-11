@@ -101,6 +101,8 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
       ADMIN_PASSWORD_HASH: encoded,
       ADMIN_TRUST_PROXY: "true",
       ADMIN_SESSION_TTL_MINUTES: "30",
+      MAX_EVENT_CLIENTS: "1",
+      MAX_EVENT_CLIENTS_PER_ADDRESS: "1",
       TLS_ENABLED: "false"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -122,6 +124,50 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   assert.equal(unauthorizedApi.headers["cross-origin-opener-policy"], "same-origin");
   assert.equal(unauthorizedApi.headers["strict-transport-security"], "max-age=31536000");
 
+  const unauthorizedStorage = await request(port, { path: "/api/storage" });
+  assert.equal(unauthorizedStorage.statusCode, 401);
+
+  const publicConfig = await request(port, { path: "/api/config" });
+  const configBody = JSON.parse(publicConfig.body);
+  assert.equal(publicConfig.statusCode, 200);
+  assert.equal(configBody.historyLimit, 96);
+  assert.equal("defaultDeviceMac" in configBody, false);
+  assert.equal("storage" in configBody, false);
+
+  const publicState = await request(port, { path: "/api/latest" });
+  const stateBody = JSON.parse(publicState.body);
+  assert.equal("errors" in stateBody, false);
+  assert.equal("storage" in stateBody, false);
+
+  const getRefresh = await request(port, { path: "/api/refresh" });
+  assert.equal(getRefresh.statusCode, 405);
+  assert.equal(getRefresh.headers.allow, "POST");
+
+  const crossOriginRefresh = await request(port, {
+    method: "POST",
+    path: "/api/refresh",
+    headers: { host: "weather.test", origin: "https://attacker.test" }
+  });
+  assert.equal(crossOriginRefresh.statusCode, 403);
+
+  const sameOriginRefresh = await request(port, {
+    method: "POST",
+    path: "/api/refresh",
+    headers: { host: "weather.test", origin: "https://weather.test" }
+  });
+  assert.equal(sameOriginRefresh.statusCode, 200);
+
+  const unknownHistory = await request(port, { path: "/api/history?mac=not-a-station" });
+  assert.equal(unknownHistory.statusCode, 400);
+  assert.match(unknownHistory.body, /Unknown weather station/);
+
+  const eventStream = await openStreamingRequest(port, { path: "/api/events" });
+  assert.equal(eventStream.res.statusCode, 200);
+  const excessEventStream = await request(port, { path: "/api/events" });
+  assert.equal(excessEventStream.statusCode, 503);
+  assert.equal(excessEventStream.headers["retry-after"], "30");
+  eventStream.req.destroy();
+
   const unauthorizedPage = await request(port, { path: "/admin.html" });
   assert.equal(unauthorizedPage.statusCode, 302);
   assert.equal(unauthorizedPage.headers.location, "/login.html?next=%2Fadmin.html");
@@ -137,7 +183,11 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   const login = await request(port, {
     method: "POST",
     path: "/api/auth/login",
-    headers: { ...jsonHeaders("weather.test"), "x-forwarded-proto": "https" },
+    headers: {
+      ...jsonHeaders("weather.test"),
+      "x-forwarded-host": "attacker.test, weather.test",
+      "x-forwarded-proto": "http, https"
+    },
     body: JSON.stringify({ username: "admin", password: testPassword })
   });
   assert.equal(login.statusCode, 200, login.body);
@@ -265,6 +315,23 @@ function request(port, options) {
     );
     req.on("error", reject);
     if (options.body) req.write(options.body);
+    req.end();
+  });
+}
+
+function openStreamingRequest(port, options) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        method: options.method || "GET",
+        path: options.path,
+        headers: options.headers || {}
+      },
+      (res) => resolve({ req, res })
+    );
+    req.on("error", reject);
     req.end();
   });
 }

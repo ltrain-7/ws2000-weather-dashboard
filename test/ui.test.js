@@ -24,6 +24,7 @@ test("administrator login is accessible and authenticated actions carry CSRF pro
 
   assert.match(login, /autocomplete="username"/);
   assert.match(login, /autocomplete="current-password"/);
+  assert.match(login, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/);
   assert.match(loginScript, /\/api\/auth\/login/);
   assert.match(adminScript, /x-csrf-token/);
   assert.match(adminScript, /\/api\/auth\/logout/);

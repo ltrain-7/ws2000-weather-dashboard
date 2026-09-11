@@ -340,7 +340,9 @@ async function loadHistory() {
   drawChart();
   try {
     const historicalView = Boolean(state.historyDate || state.historyRangeDays);
-    const limit = historicalView ? 10000 : state.config?.historyLimit || 96;
+    const limit = historicalView
+      ? state.config?.historyMaxPoints || 480
+      : state.config?.historyLimit || 96;
     const dateRange = state.historyDate
       ? historyDateRange(state.historyDate)
       : rollingDateRange(state.historyRangeDays);

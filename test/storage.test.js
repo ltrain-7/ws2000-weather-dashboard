@@ -88,6 +88,21 @@ test("empty analytics preserve missing values instead of reporting false zeroes"
   assert.equal(analytics.wettestDay, null);
 });
 
+test("history responses enforce the public query ceiling", (context) => {
+  const store = createWeatherStore({ dbPath: ":memory:", retentionDays: 0 });
+  context.after(() => store.close());
+  const macAddress = "history-limit-station";
+  const start = Date.parse("2026-01-01T00:00:00Z");
+  for (let index = 0; index < 2005; index += 1) {
+    store.saveReading({
+      macAddress,
+      dateutc: start + index * 60000,
+      tempf: 70
+    }, "test");
+  }
+  assert.equal(store.getHistory(macAddress, { limit: 10000 }).length, 2000);
+});
+
 test("daily rainfall follows the configured station timezone", (context) => {
   const previousTimezone = process.env.TZ;
   process.env.TZ = "America/Los_Angeles";

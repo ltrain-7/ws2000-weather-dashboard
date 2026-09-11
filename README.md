@@ -221,6 +221,9 @@ docker compose up -d
 | `HISTORY_MAX_POINTS` | Maximum points returned for a long-range chart |
 | `LIVE_HISTORY_LIMIT` | In-memory fallback readings; maximum 288 |
 | `HISTORY_RETENTION_DAYS` | SQLite retention; `0` keeps everything |
+| `PUBLIC_REFRESH_COOLDOWN_MS` | Shared cooldown for public manual refreshes; minimum 5 seconds |
+| `MAX_EVENT_CLIENTS` | Maximum simultaneous server-sent event connections |
+| `MAX_EVENT_CLIENTS_PER_ADDRESS` | Maximum simultaneous event connections per client address |
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
 | `LOG_MAX_SIZE` | Maximum size of each Docker log file |
 | `LOG_MAX_FILES` | Number of rotated Docker log files |
@@ -316,6 +319,8 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 
 ## Security headers and dependency policy
 
+Public refresh requests are same-origin only, coalesced, and subject to a shared cooldown. Public history responses and server-sent event connections also have hard resource ceilings. A trusted reverse proxy must replace forwarding headers from clients; the application uses the rightmost forwarded value supplied by that single proxy.
+
 The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. When `ADMIN_TRUST_PROXY=true`, startup fails unless `HOST` is loopback or a container deployment publishes `DASHBOARD_PORT` on loopback (for example `127.0.0.1:3000`). This prevents untrusted LAN clients from forging proxy headers that affect login rate limiting and HTTPS enforcement.
 
 Production dependency auditing runs at moderate severity in GitHub Actions and fails the workflow when findings meet that threshold. Socket.IO 2 compatibility is retained for Ambient Weather realtime service support, while its abandoned vulnerable URL parser is replaced by the repository's bounded WHATWG-based compatibility package under `vendor/parseuri`. The self-referential `parseuri: "$parseuri"` override in `package.json` intentionally forces transitive consumers to use that local replacement.
@@ -354,7 +359,7 @@ docker compose logs --tail=100 ws2000-dashboard
 - `GET /api/latest`
 - `GET /api/forecast`
 - `GET /api/history`
-- `GET /api/storage`
+- `GET /api/storage` (administrator session required when authentication is enabled)
 - `GET /api/events`
 
 Forecast data is provided by [Open-Meteo](https://open-meteo.com/). Review its attribution and usage terms before using the dashboard commercially or at high request volume. The built-in server cache minimizes external requests and can serve the last successful forecast during a temporary provider outage.

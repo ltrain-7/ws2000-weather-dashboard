@@ -194,6 +194,8 @@ Under **Custom Header**, choose **Create → WebSocket**. The dashboard currentl
 
 Assign the new certificate to the reverse-proxy hostname using **Control Panel → Security → Certificate → Settings** (the button may be named **Configure** on some DSM releases). Then open `https://weather.example.com` and verify that the browser shows the expected certificate.
 
+Configure the matching HTTP virtual host or reverse-proxy rule to redirect every request to the HTTPS hostname. Verify from another device that `curl -I http://weather.example.com/` returns a `301` or `308` response with a `Location: https://weather.example.com/` header; HSTS does not protect a visitor's first HTTP request unless the parent domain is already preloaded.
+
 Keep port `3000` restricted to the LAN in the DSM firewall. If remote access is required, prefer a VPN. If using direct internet access, forward only TCP 443 to the NAS, protect the dashboard with authentication, and understand the certificate provider's renewal requirements before restricting port 80.
 
 For built-in administrator authentication, use the loopback binding shown below and set `ADMIN_TRUST_PROXY=true`. This allows secure session cookies only through the DSM HTTPS hostname and prevents clients from bypassing DSM through port 3000.
