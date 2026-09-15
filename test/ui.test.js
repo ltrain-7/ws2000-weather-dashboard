@@ -107,6 +107,7 @@ test("release version and service-worker assets stay synchronized", () => {
 test("compose reports its configured image to Administration", () => {
   const compose = read("docker-compose.yml");
   assert.match(compose, /APP_IMAGE:.*WS2000_IMAGE/);
+  assert.match(compose, /cpus:.*CONTAINER_CPU_LIMIT/);
   assert.match(compose, /scripts\/healthcheck\.js/);
   assert.doesNotMatch(compose, /node -e/);
 });

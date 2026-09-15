@@ -18,6 +18,7 @@ services:
       - ./certs:/app/certs:ro
       - ./secrets:/app/secrets:ro
     mem_limit: "${CONTAINER_MEMORY_LIMIT:-256m}"
+    cpus: "${CONTAINER_CPU_LIMIT:-1.0}"
     stop_grace_period: 10s
     healthcheck:
       test:
