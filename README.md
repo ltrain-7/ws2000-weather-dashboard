@@ -225,6 +225,7 @@ docker compose up -d
 | `MAX_EVENT_CLIENTS` | Maximum simultaneous server-sent event connections |
 | `MAX_EVENT_CLIENTS_PER_ADDRESS` | Maximum simultaneous event connections per client address |
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
+| `CONTAINER_CPU_LIMIT` | Docker CPU limit; defaults to `1.0` |
 | `LOG_MAX_SIZE` | Maximum size of each Docker log file |
 | `LOG_MAX_FILES` | Number of rotated Docker log files |
 | `STATION_STALE_MINUTES` | Minutes without a reading before station health changes to warning |
