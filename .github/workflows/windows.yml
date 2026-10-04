@@ -1,0 +1,37 @@
+name: Windows setup and updater
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test setup and guarded update behavior
+        shell: pwsh
+        run: |
+          & '${{ matrix.shell }}' -NoProfile -File ./test/windows-scripts.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows script tests failed' }
+      - name: Verify Windows tar archives with spaced paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = Join-Path $env:RUNNER_TEMP 'weather backup test'
+          New-Item -ItemType Directory -Path "$folder/data" -Force | Out-Null
+          Set-Content -LiteralPath "$folder/data/weather.db" -Value 'backup fixture'
+          tar -czf "$folder/backup.tgz" -C "$folder" data
+          if ($LASTEXITCODE -ne 0) { throw 'Archive creation failed' }
+          tar -tzf "$folder/backup.tgz"
+          if ($LASTEXITCODE -ne 0) { throw 'Archive verification failed' }

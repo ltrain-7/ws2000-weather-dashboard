@@ -4,7 +4,7 @@ A private, self-hosted dashboard for Ambient Weather WS-2000 stations. It keeps 
 
 It also provides station-health warnings, previous-period comparisons, calendar rainfall totals, verified automatic backups, an installable mobile experience, and optional built-in authentication for its private administration page. The responsive dashboard prioritizes current conditions, progressively reveals secondary readings and history options, provides keyboard-accessible insight tabs, includes chart tooltips plus an accessible data table, and records when period high and low temperatures occurred.
 
-The package runs on Raspberry Pi, small Linux systems, mini PCs, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
+The package runs on Raspberry Pi, small Linux systems, mini PCs, Windows PCs with Docker Desktop, and NAS devices using Docker Compose. It contains no API keys, station identifiers, or weather history.
 
 Licensed under the [MIT License](LICENSE). Security reports should follow [SECURITY.md](SECURITY.md), and proposed changes should follow [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -16,6 +16,10 @@ Licensed under the [MIT License](LICENSE). Security reports should follow [SECUR
 - x86-64 or ARM64 Linux with Docker Compose
 
 The original Raspberry Pi Zero/Zero W uses ARMv6 and is not recommended. Raspberry Pi OS Lite 64-bit is the best low-resource choice.
+
+## Windows
+
+Use Docker Desktop with its WSL 2 backend and Linux containers. See the [Windows guide](docs/WINDOWS.md) for PowerShell setup, guarded updates, backups, and Task Scheduler instructions.
 
 ## Quick start
 
@@ -253,7 +257,7 @@ docker compose up -d
 
 Open Administration → **Check for updates** to compare the installed application version with the latest stable GitHub release. The existing Version card shows the installed revision. Checks run only when requested, use a five-second timeout, and cache successful results for one hour (failed checks for one minute). The server contacts GitHub without sending station readings, location, or credentials. An unavailable check never reports that the installation is current. Version comparison does not verify image digests or unreleased changes with the same version.
 
-Run the guarded updater manually:
+Run the guarded updater manually (Windows PowerShell: `.\scripts\update.ps1`; see the [Windows guide](docs/WINDOWS.md)):
 
 ```sh
 ./scripts/update.sh
