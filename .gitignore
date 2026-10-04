@@ -11,3 +11,4 @@ update.log
 npm-debug.log*
 Dockerfile.local
 .DS_Store
+.update.lock
