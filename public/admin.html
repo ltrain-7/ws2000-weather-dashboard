@@ -20,6 +20,16 @@
         </div>
       </header>
       <section id="adminGrid" class="admin-grid" aria-live="polite"></section>
+      <section class="admin-panel wide" aria-labelledby="updatesHeading">
+        <div class="section-heading"><div><p class="eyebrow">Software</p><h2 id="updatesHeading">Update status</h2></div></div>
+        <p id="updateStatus" role="status">Select Check for updates to compare this installation with the latest stable release.</p>
+        <p id="updateDetails" class="muted"></p>
+        <div class="admin-actions">
+          <button id="checkUpdates" class="icon-button" type="button">Check for updates</button>
+          <a id="releaseLink" class="text-link" href="https://github.com/ltrain-7/ws2000-weather-dashboard/releases" target="_blank" rel="noopener noreferrer">View releases</a>
+        </div>
+        <p class="muted">Checks GitHub for stable releases. Successful results are cached for one hour. Install updates on the host using the guarded updater: <code>./scripts/update.sh</code>.</p>
+      </section>
       <section class="admin-panel wide">
         <div class="section-heading"><div><p class="eyebrow">Maintenance</p><h2>Safe operations</h2></div></div>
         <div class="admin-actions">

@@ -50,6 +50,7 @@ async function logout() {
 }
 
 function bindActions() {
+  document.getElementById("checkUpdates").addEventListener("click", checkUpdates);
   refreshAdmin.addEventListener("click", () => loadStatus());
   integrityBtn.addEventListener("click", () => runAction("/api/admin/integrity", "Database integrity check", integrityBtn));
   backupBtn.addEventListener("click", () => runAction("/api/admin/backup", "Backup", backupBtn));
@@ -211,3 +212,33 @@ function formatRawValue(key, value) {
   return compact(numeric);
 }
 function compact(value) { return Math.abs(value) >= 100 ? String(Math.round(value)) : String(Number(value.toFixed(1))); }
+
+async function checkUpdates() {
+  const button = document.getElementById("checkUpdates");
+  const message = document.getElementById("updateStatus");
+  const detail = document.getElementById("updateDetails");
+  const link = document.getElementById("releaseLink");
+  button.disabled = true;
+  message.textContent = "Checking for updates…";
+  detail.textContent = "";
+  link.href = "https://github.com/ltrain-7/ws2000-weather-dashboard/releases";
+  try {
+    const result = await fetchJson("/api/admin/updates");
+    const labels = {
+      available: "Update available",
+      current: "Version matches the latest stable release",
+      ahead: "Installed version is newer than the latest stable release",
+      unknown: "Installed version cannot be compared",
+      unavailable: "Could not check for updates. Try again in a minute."
+    };
+    message.textContent = labels[result.state] || labels.unavailable;
+    detail.textContent = `Installed: ${result.installedVersion || "Unknown"} · Latest stable: ${result.latestVersion || "Unavailable"} · Checked ${formatDate(result.checkedAt)}`;
+    if (/^v?\d+\.\d+\.\d+$/.test(result.latestVersion || "")) {
+      link.href += `/tag/${encodeURIComponent(result.latestVersion)}`;
+    }
+  } catch {
+    message.textContent = "Could not check for updates. Check your connection and try again.";
+  } finally {
+    button.disabled = false;
+  }
+}
