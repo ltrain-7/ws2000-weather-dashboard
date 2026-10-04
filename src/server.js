@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { AdminAuth, safeStringEqual } = require("./auth");
 const { createDeploymentStatus } = require("./deployment-status");
+const { createUpdateStatus } = require("./update-status");
 const { createForecastService } = require("./forecast");
 const { createHttpResponder } = require("./http-response");
 const { createWeatherStore } = require("./storage");
@@ -12,6 +13,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const PACKAGE = require(path.join(ROOT_DIR, "package.json"));
 const STARTED_AT = new Date().toISOString();
+const updateStatus = createUpdateStatus({ installedVersion: PACKAGE.version });
 
 loadDotEnv(path.join(ROOT_DIR, ".env"));
 
@@ -309,6 +311,11 @@ async function handleApi(req, res, requestUrl) {
 
   if (req.method === "GET" && requestUrl.pathname === "/api/analytics") {
     sendJson(res, 200, analyticsResponse(requestUrl));
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/admin/updates") {
+    sendJson(res, 200, await updateStatus.check(), { "cache-control": "no-store" });
     return;
   }
 
