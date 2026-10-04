@@ -251,6 +251,8 @@ docker compose up -d
 
 ## Updating
 
+Open Administration → **Check for updates** to compare the installed application version with the latest stable GitHub release. The existing Version card shows the installed revision. Checks run only when requested, use a five-second timeout, and cache successful results for one hour (failed checks for one minute). The server contacts GitHub without sending station readings, location, or credentials. An unavailable check never reports that the installation is current. Version comparison does not verify image digests or unreleased changes with the same version.
+
 Run the guarded updater manually:
 
 ```sh

@@ -124,6 +124,10 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   assert.equal(unauthorizedApi.headers["cross-origin-opener-policy"], "same-origin");
   assert.equal(unauthorizedApi.headers["strict-transport-security"], "max-age=31536000");
 
+  const unauthorizedUpdates = await request(port, { path: "/api/admin/updates" });
+  assert.equal(unauthorizedUpdates.statusCode, 401);
+  assert.equal(unauthorizedUpdates.headers["cache-control"], "no-store");
+
   const unauthorizedStorage = await request(port, { path: "/api/storage" });
   assert.equal(unauthorizedStorage.statusCode, 401);
 

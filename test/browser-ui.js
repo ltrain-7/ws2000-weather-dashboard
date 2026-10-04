@@ -30,6 +30,7 @@ async function main() {
   try {
     await testDashboardInteractions(browser);
     await testOfflineShell(browser);
+    await testUpdateStatus(browser);
     console.log("Browser interaction and offline-shell checks passed.");
   } finally {
     await browser.close();
@@ -136,6 +137,11 @@ async function testDashboardInteractions(browser) {
     86400000
   );
 
+  for (const days of [7, 30, 90]) {
+    await page.getByRole("button", { name: `${days}D`, exact: true }).click();
+    await page.getByRole("heading", { name: new RegExp(`^Last ${days} days`) }).waitFor();
+  }
+
   await page.getByRole("button", { name: "180D", exact: true }).click();
   await page.getByRole("heading", { name: /^Last 180 days/ }).waitFor();
   assert.match(await page.locator("#historyCoverage").innerText(), /Partial range: \d+ of 180 days available/);
@@ -186,3 +192,35 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+async function testUpdateStatus(browser) {
+  const context = await browser.newContext({ serviceWorkers: "block", viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  let state = "available";
+  let checks = 0;
+  await page.route("**/api/admin/updates", async (route) => {
+    checks++;
+    if (state === "network-error") return route.abort();
+    return json(route, { state, installedVersion: "1.9.2", latestVersion: state === "unavailable" ? null : "v1.10.0", checkedAt: new Date().toISOString() });
+  });
+  await page.goto(`${baseUrl}/admin.html`);
+  await page.getByText("Status refreshed.", { exact: true }).waitFor();
+  assert.equal(checks, 0, "Opening Administration should not contact GitHub");
+  for (const [next, label] of [
+    ["available", "Update available"],
+    ["current", "Version matches the latest stable release"],
+    ["ahead", "Installed version is newer than the latest stable release"],
+    ["unknown", "Installed version cannot be compared"],
+    ["unavailable", "Could not check for updates. Try again in a minute."],
+    ["network-error", "Could not check for updates. Check your connection and try again."]
+  ]) {
+    state = next;
+    await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+    await page.getByText(label, { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Check for updates", exact: true }).isEnabled(), true);
+    const releaseUrl = await page.locator("#releaseLink").getAttribute("href");
+    assert.equal(releaseUrl, `https://github.com/ltrain-7/ws2000-weather-dashboard/releases${["unavailable", "network-error"].includes(state) ? "" : "/tag/v1.10.0"}`);
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await context.close();
+}
