@@ -20,10 +20,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test setup and guarded update behavior
-        shell: ${{ matrix.shell }}
-        run: ./test/windows-scripts.ps1
+        shell: pwsh
+        run: |
+          & '${{ matrix.shell }}' -NoProfile -File ./test/windows-scripts.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows script tests failed' }
       - name: Verify Windows tar archives with spaced paths
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $folder = Join-Path $env:RUNNER_TEMP 'weather backup test'
