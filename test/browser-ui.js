@@ -139,16 +139,16 @@ async function testDashboardInteractions(browser) {
 
   for (const [buttonName, headingName] of [
     ["Last 7 days", "Last 7 days"],
-    ["Last 1 month", "Last 1 month"],
-    ["Last 3 months", "Last 3 months"],
-    ["Last 9 months", "Last 9 months"]
+    ["Last 1 month", "Last 1 month · 6h average"],
+    ["Last 3 months", "Last 3 months · 24h average"],
+    ["Last 9 months", "Last 9 months · 48h average"]
   ]) {
     await page.getByRole("button", { name: buttonName, exact: true }).click();
     await page.getByRole("heading", { name: headingName, exact: true }).waitFor();
   }
 
   await page.getByRole("button", { name: "Last 12 months", exact: true }).click();
-  await page.getByRole("heading", { name: "Last 12 months", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Last 12 months · 48h average", exact: true }).waitFor();
   assert.match(await page.locator("#historyCoverage").innerText(), /Partial range: \d+ of 365 days available/);
 
   await page.locator("#historyOptions > summary").click();
