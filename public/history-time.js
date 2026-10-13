@@ -1,6 +1,15 @@
 (function exposeHistoryTime(global) {
   "use strict";
 
+  const RANGE_LABELS = Object.freeze({
+    1: "Last 24 hours",
+    7: "Last 7 days",
+    30: "Last 1 month",
+    90: "Last 3 months",
+    270: "Last 9 months",
+    365: "Last 12 months"
+  });
+
   function historyDateRange(value, timezone) {
     if (!value) return null;
     const [year, month, day] = value.split("-").map(Number);
@@ -63,7 +72,8 @@
   }
 
   function rangeLabel(days) {
-    return Number(days) === 1 ? "Last 1 day" : `Last ${days} days`;
+    const value = Number(days);
+    return RANGE_LABELS[value] || `Last ${value} days`;
   }
 
   function toDateInputValue(date, timezone) {
