@@ -124,27 +124,32 @@ async function testDashboardInteractions(browser) {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Browser Test Station", exact: true }).waitFor();
   assert.match(await page.locator("#forecastGrid").innerText(), /Today[\s\S]*Partly cloudy[\s\S]*78° \/ 61°[\s\S]*42% rain/);
-  await page.getByRole("button", { name: "1D", exact: true }).click();
-  await page.getByRole("heading", { name: "Last 1 day", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Last 24 hours", exact: true }).click();
+  await page.getByRole("heading", { name: "Last 24 hours", exact: true }).waitFor();
 
   const summary = await page.locator("#summaryGrid").innerText();
   assert.match(summary, /High temp\s*88(?:\.0)?°F/i);
   assert.match(summary, /Low temp\s*61(?:\.0)?°F/i);
   assert.match(summary, /Observed\s+[A-Z][a-z]{2}\s+\d{1,2}/);
-  assert.ok(lastHistoryRequest, "The 1D control should request stored history.");
+  assert.ok(lastHistoryRequest, "The 24H control should request stored history.");
   assert.equal(
     Date.parse(lastHistoryRequest.searchParams.get("endDate")) - Date.parse(lastHistoryRequest.searchParams.get("startDate")),
     86400000
   );
 
-  for (const days of [7, 30, 90]) {
-    await page.getByRole("button", { name: `${days}D`, exact: true }).click();
-    await page.getByRole("heading", { name: new RegExp(`^Last ${days} days`) }).waitFor();
+  for (const [buttonName, headingName] of [
+    ["Last 7 days", "Last 7 days"],
+    ["Last 1 month", "Last 1 month · 6h average"],
+    ["Last 3 months", "Last 3 months · 24h average"],
+    ["Last 9 months", "Last 9 months · 48h average"]
+  ]) {
+    await page.getByRole("button", { name: buttonName, exact: true }).click();
+    await page.getByRole("heading", { name: headingName, exact: true }).waitFor();
   }
 
-  await page.getByRole("button", { name: "180D", exact: true }).click();
-  await page.getByRole("heading", { name: /^Last 180 days/ }).waitFor();
-  assert.match(await page.locator("#historyCoverage").innerText(), /Partial range: \d+ of 180 days available/);
+  await page.getByRole("button", { name: "Last 12 months", exact: true }).click();
+  await page.getByRole("heading", { name: "Last 12 months · 48h average", exact: true }).waitFor();
+  assert.match(await page.locator("#historyCoverage").innerText(), /Partial range: \d+ of 365 days available/);
 
   await page.locator("#historyOptions > summary").click();
   await page.locator("#historyDate").fill("2026-03-08");
@@ -157,11 +162,11 @@ async function testDashboardInteractions(browser) {
     "DST transition days should use the station timezone."
   );
 
-  const firstRow = await Promise.all(["Latest", "1D", "7D"].map(async (name) => {
+  const firstRow = await Promise.all(["Last 24 hours", "Last 7 days", "Last 1 month"].map(async (name) => {
     const box = await page.getByRole("button", { name, exact: true }).boundingBox();
     return box.y;
   }));
-  const secondRow = await page.getByRole("button", { name: "30D", exact: true }).boundingBox();
+  const secondRow = await page.getByRole("button", { name: "Last 3 months", exact: true }).boundingBox();
   assert.ok(Math.max(...firstRow) - Math.min(...firstRow) < 2, "The first three mobile ranges should share a row.");
   assert.ok(secondRow.y > firstRow[0] + 20, "The remaining mobile ranges should use a second row.");
 
@@ -176,7 +181,7 @@ async function testOfflineShell(browser) {
   await page.reload({ waitUntil: "domcontentloaded" });
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "1D", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Last 24 hours", exact: true }).waitFor();
   await context.close();
 }
 

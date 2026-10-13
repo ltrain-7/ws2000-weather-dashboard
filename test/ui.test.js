@@ -51,8 +51,9 @@ test("dashboard controls retain accessible interaction states", () => {
   const worker = read("public/service-worker.js");
 
   assert.match(dashboard, /role="tablist" aria-label="Chart metric"/);
-  assert.match(dashboard, /aria-pressed="true" data-range-days="0"/);
-  assert.match(dashboard, /data-range-days="1">1D<\/button>/);
+  assert.match(dashboard, /aria-label="Last 24 hours" aria-pressed="true" data-range-days="1">24H<\/button>/);
+  assert.match(dashboard, /aria-label="Last 12 months" aria-pressed="false" data-range-days="365">12M<\/button>/);
+  assert.doesNotMatch(dashboard, /data-range-days="0">Latest<\/button>/);
   assert.match(dashboard, /id="historyCoverage"/);
   assert.match(dashboard, /id="updateBanner"/);
   assert.match(dashboard, /aria-describedby="chartSummary chartMessage"/);

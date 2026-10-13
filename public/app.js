@@ -5,7 +5,7 @@ const state = {
   selectedMac: localStorage.getItem("selectedMac") || "",
   chartMetric: localStorage.getItem("chartMetric") || "tempf",
   historyDate: "",
-  historyRangeDays: 0,
+  historyRangeDays: 1,
   history: [],
   comparisonHistory: [],
   analytics: null,
@@ -148,7 +148,7 @@ function bindEvents() {
 
   els.historyDate.addEventListener("change", async () => {
     state.historyDate = els.historyDate.value;
-    state.historyRangeDays = 0;
+    state.historyRangeDays = state.historyDate ? 0 : 1;
     setRangeButtons();
     await loadHistory();
   });
@@ -700,7 +700,7 @@ function renderHistoryCoverage(firstReadingAt, availableDays) {
     els.historyCoverage.textContent = `Partial range: ${availableDays} of ${state.historyRangeDays} days available since ${since}.`;
     return;
   }
-  els.historyCoverage.textContent = `Data available since ${since}. 1D is a rolling 24-hour period.`;
+  els.historyCoverage.textContent = `Data available since ${since}. 24H is a rolling 24-hour period.`;
 }
 
 function setInsightTab(value) {

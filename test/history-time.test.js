@@ -14,3 +14,12 @@ test("history time module honors daylight-saving station days", () => {
   assert.equal(range.end, "2026-03-09T03:59:59.999Z");
   assert.equal(Date.parse(range.end) - Date.parse(range.start) + 1, 23 * 60 * 60 * 1000);
 });
+
+test("history range labels use concise calendar-friendly presets", () => {
+  const window = {};
+  vm.runInNewContext(source, { window, Date, Intl, Number, Object });
+  assert.equal(window.WeatherHistoryTime.rangeLabel(1), "Last 24 hours");
+  assert.equal(window.WeatherHistoryTime.rangeLabel(30), "Last 1 month");
+  assert.equal(window.WeatherHistoryTime.rangeLabel(270), "Last 9 months");
+  assert.equal(window.WeatherHistoryTime.rangeLabel(365), "Last 12 months");
+});
