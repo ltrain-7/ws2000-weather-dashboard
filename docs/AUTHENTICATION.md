@@ -37,10 +37,12 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD_HASH='scrypt$...paste-the-complete-generated-value...'
 ADMIN_SESSION_TTL_MINUTES=480
 ADMIN_TRUST_PROXY=true
+PUBLIC_ORIGIN=https://weather.example.com
+HTTPS_REDIRECT_ENABLED=true
 TLS_ENABLED=false
 ```
 
-Keep the single quotes around the hash because Compose otherwise interprets dollar signs. `ADMIN_TRUST_PROXY=true` is safe only when port 3000 is bound to `127.0.0.1` and DSM is the only path to the app; the server now refuses to start when it detects an unsafe binding.
+Keep the single quotes around the hash because Compose otherwise interprets dollar signs. Replace `weather.example.com` with the exact browser hostname; this canonical origin prevents a client-supplied forwarded host from weakening Origin checks. `ADMIN_TRUST_PROXY=true` is safe only when port 3000 is bound to `127.0.0.1` and DSM is the only path to the app; the server refuses to start when it detects an unsafe binding.
 
 Recreate the container:
 

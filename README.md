@@ -226,6 +226,8 @@ docker compose up -d
 | `LIVE_HISTORY_LIMIT` | In-memory fallback readings; maximum 288 |
 | `HISTORY_RETENTION_DAYS` | SQLite retention; `0` keeps everything |
 | `PUBLIC_REFRESH_COOLDOWN_MS` | Shared cooldown for public manual refreshes; minimum 5 seconds |
+| `PUBLIC_QUERY_RATE_LIMIT` | Per-client history and analytics request limit; defaults to 120 per window |
+| `PUBLIC_QUERY_RATE_WINDOW_MS` | Public-query rate-limit window; defaults to 60 seconds |
 | `MAX_EVENT_CLIENTS` | Maximum simultaneous server-sent event connections |
 | `MAX_EVENT_CLIENTS_PER_ADDRESS` | Maximum simultaneous event connections per client address |
 | `CONTAINER_MEMORY_LIMIT` | Docker memory limit, such as `256m` |
@@ -247,6 +249,8 @@ docker compose up -d
 | `ADMIN_PASSWORD_HASH_FILE` | Optional read-only hash file, such as `/app/secrets/admin-password.hash` |
 | `ADMIN_SESSION_TTL_MINUTES` | Administrator session lifetime; defaults to 480 minutes |
 | `ADMIN_TRUST_PROXY` | Trusts a local reverse proxy's forwarded client and HTTPS headers; startup requires a loopback-only bind |
+| `PUBLIC_ORIGIN` | Canonical browser origin, such as `https://weather.example.com`, used for strict Origin checks and HTTPS redirects |
+| `HTTPS_REDIRECT_ENABLED` | Redirects proxy requests marked as HTTP to `PUBLIC_ORIGIN`; defaults to true when `PUBLIC_ORIGIN` is set |
 | `TLS_ENABLED` | Enables native Node HTTPS; defaults to `false` |
 | `TLS_CERT_PATH` | Certificate chain inside the container; defaults to `/app/certs/fullchain.pem` |
 | `TLS_KEY_PATH` | Private key inside the container; defaults to `/app/certs/privkey.pem` |
@@ -326,7 +330,7 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 
 ## Security headers and dependency policy
 
-Public refresh requests are same-origin only, coalesced, and subject to a shared cooldown. Public history responses and server-sent event connections also have hard resource ceilings. A trusted reverse proxy must replace forwarding headers from clients; the application uses the rightmost forwarded value supplied by that single proxy.
+Public refresh requests are same-origin only, coalesced, and subject to a shared cooldown. Public history and analytics requests have per-client rate limits, while history responses and server-sent event connections also have hard resource ceilings. Set `PUBLIC_ORIGIN` behind a reverse proxy so browser Origin checks never depend on forwarding headers supplied by a client. A trusted reverse proxy must replace forwarding headers used for client addresses and HTTPS detection; the application uses the rightmost forwarded value supplied by that single proxy.
 
 The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. When `ADMIN_TRUST_PROXY=true`, startup fails unless `HOST` is loopback or a container deployment publishes `DASHBOARD_PORT` on loopback (for example `127.0.0.1:3000`). This prevents untrusted LAN clients from forging proxy headers that affect login rate limiting and HTTPS enforcement.
 
