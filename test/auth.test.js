@@ -100,6 +100,9 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
       ADMIN_USERNAME: "admin",
       ADMIN_PASSWORD_HASH: encoded,
       ADMIN_TRUST_PROXY: "true",
+      PUBLIC_ORIGIN: "https://weather.test",
+      HTTPS_REDIRECT_ENABLED: "true",
+      PUBLIC_QUERY_RATE_LIMIT: "10",
       ADMIN_SESSION_TTL_MINUTES: "30",
       MAX_EVENT_CLIENTS: "1",
       MAX_EVENT_CLIENTS_PER_ADDRESS: "1",
@@ -154,6 +157,19 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   });
   assert.equal(crossOriginRefresh.statusCode, 403);
 
+  const spoofedForwardedHost = await request(port, {
+    method: "POST",
+    path: "/api/auth/login",
+    headers: {
+      ...jsonHeaders("attacker.test"),
+      host: "weather.test",
+      "x-forwarded-host": "attacker.test",
+      "x-forwarded-proto": "https"
+    },
+    body: JSON.stringify({ username: "admin", password: testPassword })
+  });
+  assert.equal(spoofedForwardedHost.statusCode, 403);
+
   const sameOriginRefresh = await request(port, {
     method: "POST",
     path: "/api/refresh",
@@ -164,6 +180,21 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   const unknownHistory = await request(port, { path: "/api/history?mac=not-a-station" });
   assert.equal(unknownHistory.statusCode, 400);
   assert.match(unknownHistory.body, /Unknown weather station/);
+
+  const httpDashboard = await request(port, {
+    path: "/?range=24h",
+    headers: { host: "weather.test", "x-forwarded-proto": "http" }
+  });
+  assert.equal(httpDashboard.statusCode, 308);
+  assert.equal(httpDashboard.headers.location, "https://weather.test/?range=24h");
+
+  for (let attempt = 0; attempt < 9; attempt += 1) {
+    const response = await request(port, { path: "/api/history?mac=not-a-station" });
+    assert.equal(response.statusCode, 400);
+  }
+  const limitedHistory = await request(port, { path: "/api/history?mac=not-a-station" });
+  assert.equal(limitedHistory.statusCode, 429);
+  assert.equal(limitedHistory.headers["retry-after"], "60");
 
   const eventStream = await openStreamingRequest(port, { path: "/api/events" });
   assert.equal(eventStream.res.statusCode, 200);

@@ -7,6 +7,7 @@ const { createDeploymentStatus } = require("./deployment-status");
 const { createUpdateStatus } = require("./update-status");
 const { createForecastService } = require("./forecast");
 const { createHttpResponder } = require("./http-response");
+const { RequestRateLimiter } = require("./rate-limit");
 const { createWeatherStore } = require("./storage");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -26,6 +27,8 @@ const TLS_CERT_PATH = clean(process.env.TLS_CERT_PATH) || "/app/certs/fullchain.
 const TLS_KEY_PATH = clean(process.env.TLS_KEY_PATH) || "/app/certs/privkey.pem";
 const ADMIN_AUTH_ENABLED = booleanFromEnv("ADMIN_AUTH_ENABLED", false);
 const ADMIN_TRUST_PROXY = booleanFromEnv("ADMIN_TRUST_PROXY", false);
+const PUBLIC_ORIGIN = originFromEnv("PUBLIC_ORIGIN");
+const HTTPS_REDIRECT_ENABLED = booleanFromEnv("HTTPS_REDIRECT_ENABLED", Boolean(PUBLIC_ORIGIN));
 const ADMIN_USERNAME = clean(process.env.ADMIN_USERNAME) || "admin";
 const ADMIN_SESSION_TTL_MINUTES = clamp(
   numberFromEnv("ADMIN_SESSION_TTL_MINUTES", 480),
@@ -47,6 +50,12 @@ const POLL_INTERVAL_MS = clamp(
 const HISTORY_LIMIT = clamp(numberFromEnv("AMBIENT_HISTORY_LIMIT", 96), 1, 288);
 const HISTORY_MAX_POINTS = clamp(numberFromEnv("HISTORY_MAX_POINTS", 480), 120, 2000);
 const HISTORY_QUERY_LIMIT = 2000;
+const PUBLIC_QUERY_RATE_LIMIT = clamp(numberFromEnv("PUBLIC_QUERY_RATE_LIMIT", 120), 10, 10_000);
+const PUBLIC_QUERY_RATE_WINDOW_MS = clamp(
+  numberFromEnv("PUBLIC_QUERY_RATE_WINDOW_MS", 60_000),
+  10_000,
+  60 * 60 * 1000
+);
 const LIVE_HISTORY_LIMIT = clamp(numberFromEnv("LIVE_HISTORY_LIMIT", 192), 24, 288);
 const HISTORY_RETENTION_DAYS = clamp(numberFromEnv("HISTORY_RETENTION_DAYS", 365), 0, 3650);
 const SQLITE_DB_PATH =
@@ -72,7 +81,7 @@ const MAX_EVENT_CLIENTS_PER_ADDRESS = clamp(
 );
 const ADMIN_COOKIE_NAME = "__Host-weather_session";
 const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
-const { redirect, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
+const { redirect, redirectPermanent, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
   publicDir: PUBLIC_DIR,
   strictTransport: TLS_ENABLED || ADMIN_TRUST_PROXY
 });
@@ -90,6 +99,10 @@ const adminAuth = new AdminAuth({
   username: ADMIN_USERNAME,
   passwordHash: ADMIN_PASSWORD_HASH,
   sessionTtlMs: ADMIN_SESSION_TTL_MINUTES * 60 * 1000
+});
+const publicQueryLimiter = new RequestRateLimiter({
+  maxRequests: PUBLIC_QUERY_RATE_LIMIT,
+  windowMs: PUBLIC_QUERY_RATE_WINDOW_MS
 });
 const authCleanupTimer = ADMIN_AUTH_ENABLED
   ? setInterval(() => adminAuth.sweep(), 5 * 60 * 1000)
@@ -161,6 +174,12 @@ const requestHandler = async (req, res) => {
   try {
     const protocol = TLS_ENABLED ? "https" : "http";
     const requestUrl = new URL(req.url, `${protocol}://${req.headers.host || "localhost"}`);
+
+    const secureLocation = httpsRedirectLocation(req, requestUrl);
+    if (secureLocation) {
+      redirectPermanent(res, secureLocation);
+      return;
+    }
 
     if (requestUrl.pathname.startsWith("/api/")) {
       await handleApi(req, res, requestUrl);
@@ -310,6 +329,7 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (req.method === "GET" && requestUrl.pathname === "/api/analytics") {
+    if (!authorizePublicQuery(req, res)) return;
     sendJson(res, 200, analyticsResponse(requestUrl));
     return;
   }
@@ -383,6 +403,7 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (req.method === "GET" && requestUrl.pathname === "/api/history") {
+    if (!authorizePublicQuery(req, res)) return;
     await handleHistory(res, requestUrl);
     return;
   }
@@ -1008,6 +1029,18 @@ function clientAddress(req) {
   return req.socket.remoteAddress || "unknown";
 }
 
+function authorizePublicQuery(req, res) {
+  const result = publicQueryLimiter.check(clientAddress(req));
+  if (result.allowed) return true;
+  sendJson(
+    res,
+    429,
+    { error: "Too many history or analytics requests. Try again later." },
+    { "cache-control": "no-store", "retry-after": String(result.retryAfterSeconds) }
+  );
+  return false;
+}
+
 async function readJsonBody(req, maximumBytes) {
   const chunks = [];
   let size = 0;
@@ -1036,8 +1069,9 @@ function isSameOriginRequest(req) {
   const origin = clean(req.headers.origin);
   if (!origin) return true;
   try {
-    const forwardedHost = ADMIN_TRUST_PROXY ? forwardedHeader(req, "x-forwarded-host") : "";
-    return new URL(origin).host === (forwardedHost || req.headers.host);
+    const parsedOrigin = new URL(origin);
+    if (PUBLIC_ORIGIN) return parsedOrigin.origin === PUBLIC_ORIGIN;
+    return parsedOrigin.host === clean(req.headers.host);
   } catch {
     return false;
   }
@@ -1053,6 +1087,13 @@ function forwardedHeader(req, name) {
     .map((value) => value.trim())
     .filter(Boolean)
     .at(-1) || "";
+}
+
+function httpsRedirectLocation(req, requestUrl) {
+  if (!HTTPS_REDIRECT_ENABLED || !ADMIN_TRUST_PROXY) return "";
+  if (forwardedHeader(req, "x-forwarded-proto").toLowerCase() !== "http") return "";
+  if (!PUBLIC_ORIGIN) return "";
+  return new URL(`${requestUrl.pathname}${requestUrl.search}`, `${PUBLIC_ORIGIN}/`).toString();
 }
 
 async function runBackup(reason) {
@@ -1355,6 +1396,25 @@ function booleanFromEnv(name, fallback) {
   if (["1", "true", "yes", "on"].includes(value)) return true;
   if (["0", "false", "no", "off"].includes(value)) return false;
   throw new Error(`${name} must be true or false.`);
+}
+
+function originFromEnv(name) {
+  const value = clean(process.env[name]);
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    if (!["http:", "https:"].includes(parsed.protocol)
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== "/"
+      || parsed.search
+      || parsed.hash) {
+      throw new Error("invalid origin");
+    }
+    return parsed.origin;
+  } catch {
+    throw new Error(`${name} must be an HTTP(S) origin without a path, query, or fragment.`);
+  }
 }
 
 function loadTlsOptions() {

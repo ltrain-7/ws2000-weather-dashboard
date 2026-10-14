@@ -59,6 +59,15 @@ function createHttpResponder(options) {
     res.end();
   }
 
+  function redirectPermanent(res, location) {
+    res.writeHead(308, {
+      location,
+      "cache-control": "no-store",
+      ...securityHeaders()
+    });
+    res.end();
+  }
+
   async function serveStatic(requestUrl, res, requestHeaders = {}) {
     const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
     let decodedPath;
@@ -111,7 +120,7 @@ function createHttpResponder(options) {
     fs.createReadStream(filePath).pipe(res);
   }
 
-  return { redirect, securityHeaders, sendJson, sendText, serveStatic };
+  return { redirect, redirectPermanent, securityHeaders, sendJson, sendText, serveStatic };
 }
 
 module.exports = { createHttpResponder };
