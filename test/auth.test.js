@@ -74,6 +74,61 @@ test("enabled authentication fails closed when its password hash is invalid", ()
   );
 });
 
+test("concurrent logins reserve attempts before verification and reject same-client overlap", async () => {
+  const encoded = await hashPassword(testPassword, { N: 16384, r: 8, p: 1 });
+  let release;
+  let calls = 0;
+  const auth = new AdminAuth({
+    enabled: true,
+    passwordHash: encoded,
+    verifyPassword: () => {
+      calls += 1;
+      return new Promise((resolve) => { release = resolve; });
+    }
+  });
+  const first = auth.authenticate("admin", "wrong", "client");
+  const overlapping = await Promise.all(Array.from({ length: 20 }, () =>
+    auth.authenticate("admin", testPassword, "client")));
+  assert.equal(calls, 1);
+  assert.equal(auth.limiter.entries.get("client").count, 1);
+  assert.ok(overlapping.every((result) => result.reason === "rate-limited"));
+  assert.equal(auth.sessions.size, 0);
+  release(false);
+  assert.equal((await first).reason, "invalid");
+
+  auth.verify = async () => { calls += 1; return false; };
+  for (let index = 0; index < 4; index += 1) await auth.authenticate("admin", "wrong", "client");
+  assert.equal((await auth.authenticate("admin", "wrong", "client")).reason, "rate-limited");
+  assert.equal(calls, 5);
+});
+
+test("password verification has a global bound and releases capacity on success and failure", async () => {
+  const encoded = await hashPassword(testPassword, { N: 16384, r: 8, p: 1 });
+  const releases = [];
+  const auth = new AdminAuth({
+    enabled: true, passwordHash: encoded,
+    verifyPassword: () => new Promise((resolve) => releases.push(resolve))
+  });
+  const first = auth.authenticate("admin", testPassword, "one");
+  const second = auth.authenticate("admin", "wrong", "two");
+  assert.equal((await auth.authenticate("admin", "wrong", "three")).reason, "rate-limited");
+  assert.equal(releases.length, 2);
+  releases[0](true);
+  assert.equal((await first).ok, true);
+  assert.equal(auth.limiter.entries.has("one"), false);
+  const third = auth.authenticate("admin", "wrong", "three");
+  assert.equal(releases.length, 3);
+  releases[1](false);
+  releases[2](false);
+  await Promise.all([second, third]);
+  assert.equal(auth.verifyingClients.size, 0);
+
+  auth.verify = async () => { throw new Error("verification failed"); };
+  await assert.rejects(auth.authenticate("admin", "wrong", "four"), /verification failed/);
+  assert.equal(auth.verifyingClients.size, 0);
+  assert.equal(auth.limiter.entries.get("four").count, 1);
+});
+
 test("server protects administration routes, requires HTTPS and CSRF, and clears logout sessions", async (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-auth-server-"));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -195,6 +250,10 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   const limitedHistory = await request(port, { path: "/api/history?mac=not-a-station" });
   assert.equal(limitedHistory.statusCode, 429);
   assert.equal(limitedHistory.headers["retry-after"], "60");
+
+  const limitedForecast = await request(port, { path: "/api/forecast" });
+  assert.equal(limitedForecast.statusCode, 429);
+  assert.equal(limitedForecast.headers["retry-after"], "60");
 
   const eventStream = await openStreamingRequest(port, { path: "/api/events" });
   assert.equal(eventStream.res.statusCode, 200);

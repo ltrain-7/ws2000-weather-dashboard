@@ -68,6 +68,76 @@ test("forecast stays gracefully unavailable until a valid location exists", asyn
   assert.equal(fetchCount, 0);
 });
 
+test("concurrent cold and expired forecast requests share a refresh and failure backoff", async () => {
+  let clock = Date.parse("2026-09-03T12:00:00Z");
+  let fetchCount = 0;
+  let release;
+  const service = createForecastService({
+    latitude: 40, longitude: -75, cacheTtlMs: 15 * 60 * 1000,
+    now: () => clock,
+    fetchImpl: () => {
+      fetchCount += 1;
+      return new Promise((resolve, reject) => { release = { resolve, reject }; });
+    }
+  });
+  const cold = Array.from({ length: 20 }, () => service.getForecast());
+  assert.equal(fetchCount, 1);
+  release.resolve({ ok: true, json: async () => providerPayload });
+  assert.ok((await Promise.all(cold)).every((result) => result.available));
+  clock += 16 * 60 * 1000;
+  const expired = Array.from({ length: 20 }, () => service.getForecast());
+  assert.equal(fetchCount, 2);
+  release.reject(new Error("provider unavailable"));
+  assert.ok((await Promise.all(expired)).every((result) => result.stale));
+  assert.equal((await service.getForecast()).stale, true);
+  assert.equal(fetchCount, 2);
+  clock += 60_001;
+  const retry = service.getForecast();
+  assert.equal(fetchCount, 3);
+  release.resolve({ ok: true, json: async () => providerPayload });
+  assert.equal((await retry).stale, false);
+});
+
+test("a failed cold refresh releases its pending request after the retry interval", async () => {
+  let clock = 1_000_000;
+  let fetchCount = 0;
+  const service = createForecastService({
+    latitude: 40, longitude: -75, now: () => clock,
+    fetchImpl: async () => { fetchCount += 1; throw new Error("provider unavailable"); }
+  });
+  const results = await Promise.allSettled(Array.from({ length: 20 }, () => service.getForecast()));
+  assert.ok(results.every((result) => result.status === "rejected"));
+  assert.equal(fetchCount, 1);
+  await assert.rejects(service.getForecast(), /temporarily delayed/);
+  clock += 60_001;
+  await assert.rejects(service.getForecast(), /provider unavailable/);
+  assert.equal(fetchCount, 2);
+});
+
+test("an in-flight forecast cannot populate the cache after station coordinates change", async () => {
+  let release;
+  let fetchCount = 0;
+  const service = createForecastService({
+    fetchImpl: () => {
+      fetchCount += 1;
+      return new Promise((resolve) => { release = resolve; });
+    }
+  });
+  service.useDevice({ info: { latitude: 40, longitude: -75, name: "Old station" } });
+  const old = service.getForecast();
+  service.useDevice({ info: { latitude: 41, longitude: -75, name: "New station" } });
+  const overlapping = service.getForecast();
+  assert.equal(fetchCount, 1);
+  release({ ok: true, json: async () => providerPayload });
+  assert.equal((await old).reason, "location-changed");
+  assert.equal((await overlapping).available, false);
+  assert.equal(service.status().lastUpdatedAt, null);
+  const current = service.getForecast();
+  assert.equal(fetchCount, 2);
+  release({ ok: true, json: async () => providerPayload });
+  assert.equal((await current).locationName, "New station");
+});
+
 test("forecast returns its last successful result when the provider is temporarily unavailable", async () => {
   let clock = Date.parse("2026-09-03T12:00:00Z");
   let shouldFail = false;

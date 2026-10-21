@@ -101,7 +101,7 @@ class LoginLimiter {
     };
   }
 
-  recordFailure(key) {
+  reserveAttempt(key) {
     const now = this.now();
     const local = this.increment(String(key || "unknown"), now, this.maxAttempts);
     return {
@@ -163,6 +163,8 @@ class AdminAuth {
     this.maxSessions = options.maxSessions || 128;
     this.sessions = new Map();
     this.limiter = options.limiter || new LoginLimiter({ now: this.now });
+    this.maxConcurrentVerifications = options.maxConcurrentVerifications || 2;
+    this.verifyingClients = new Set();
 
     if (this.enabled) parsePasswordHash(this.passwordHash);
   }
@@ -172,15 +174,27 @@ class AdminAuth {
     const limit = this.limiter.check(clientKey);
     if (!limit.allowed) return { ok: false, reason: "rate-limited", ...limit };
 
-    const [usernameMatches, passwordMatches] = await Promise.all([
-      Promise.resolve(safeStringEqual(String(username || ""), this.username)),
-      this.verify(String(password || ""), this.passwordHash)
-    ]);
-    if (!usernameMatches || !passwordMatches) {
-      const failure = this.limiter.recordFailure(clientKey);
-      return { ok: false, reason: "invalid", ...failure };
+    const key = String(clientKey || "unknown");
+    if (this.verifyingClients.has(key) || this.verifyingClients.size >= this.maxConcurrentVerifications) {
+      return { ok: false, reason: "rate-limited", allowed: false, retryAfterSeconds: 1 };
     }
 
+    // Reserve the attempt before yielding, and never queue unbounded scrypt work.
+    const attempt = this.limiter.reserveAttempt(key);
+    this.verifyingClients.add(key);
+    try {
+      const usernameMatches = safeStringEqual(String(username || ""), this.username);
+      const passwordMatches = await this.verify(String(password || ""), this.passwordHash);
+      if (!usernameMatches || !passwordMatches) {
+        return { ok: false, reason: "invalid", ...attempt };
+      }
+      return this.createSession(key);
+    } finally {
+      this.verifyingClients.delete(key);
+    }
+  }
+
+  createSession(clientKey) {
     this.limiter.reset(clientKey);
     this.sweep();
     if (this.sessions.size >= this.maxSessions) {

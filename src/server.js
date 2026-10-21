@@ -315,6 +315,7 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (req.method === "GET" && requestUrl.pathname === "/api/forecast") {
+    if (!authorizePublicQuery(req, res)) return;
     try {
       sendJson(res, 200, await forecastService.getForecast());
     } catch (error) {
@@ -1035,7 +1036,7 @@ function authorizePublicQuery(req, res) {
   sendJson(
     res,
     429,
-    { error: "Too many history or analytics requests. Try again later." },
+    { error: "Too many history, analytics, or forecast requests. Try again later." },
     { "cache-control": "no-store", "retry-after": String(result.retryAfterSeconds) }
   );
   return false;

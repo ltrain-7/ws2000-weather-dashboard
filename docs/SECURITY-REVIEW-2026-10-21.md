@@ -2,6 +2,8 @@
 
 Reviewed `main` at commit `2731c8f4cc4b9f731b12bd9861c50b2effe17640`, application version 1.10.2, on October 21, 2026. This was a source review and local testing; no deployed service was probed and no source changes were made.
 
+Remediation on this branch: the POSIX updater now stages deployment metadata and archives in a private host-side directory and replaces destination entries without following planted links; backup pruning accepts only fixed-format archive names. Login attempts are reserved before password verification, with one verification per client and two globally. Forecast refreshes share a pending request, reject results for changed coordinates, and use the public request limiter. Regression tests cover these fixes. The findings below describe the original reviewed commit.
+
 ## 1. High, conditional: root updater follows symlinks from container-writable storage
 
 Location: `scripts/update.sh:85–92`; related configuration: `docker-compose.yml:16` and the root scheduled-update instructions in `README.md:280–283`.
