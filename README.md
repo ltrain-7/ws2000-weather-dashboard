@@ -226,7 +226,7 @@ docker compose up -d
 | `LIVE_HISTORY_LIMIT` | In-memory fallback readings; maximum 288 |
 | `HISTORY_RETENTION_DAYS` | SQLite retention; `0` keeps everything |
 | `PUBLIC_REFRESH_COOLDOWN_MS` | Shared cooldown for public manual refreshes; minimum 5 seconds |
-| `PUBLIC_QUERY_RATE_LIMIT` | Per-client history and analytics request limit; defaults to 120 per window |
+| `PUBLIC_QUERY_RATE_LIMIT` | Per-client history, analytics, and forecast request limit; defaults to 120 per window |
 | `PUBLIC_QUERY_RATE_WINDOW_MS` | Public-query rate-limit window; defaults to 60 seconds |
 | `MAX_EVENT_CLIENTS` | Maximum simultaneous server-sent event connections |
 | `MAX_EVENT_CLIENTS_PER_ADDRESS` | Maximum simultaneous event connections per client address |
@@ -268,6 +268,8 @@ Run the guarded updater manually (Windows PowerShell: `.\scripts\update.ps1`; se
 ```
 
 The updater pulls the `stable` image, stops the app briefly for a consistent SQLite backup, starts the new version, checks `/api/health`, and rolls back to the prior image if the health check fails. Backups are stored under `backups/`. After a successful health check it records the deployed image, immutable digest, source revision, and update time in `data/deployment.json`; Administration displays that record. A failed update does not replace the last-known-good deployment record.
+
+For the POSIX updater (`scripts/update.sh`), keep the project directory owned by the host administrator and unwritable by the container user; only `data/` and `backups/` need application write access. The updater stages archives and deployment metadata in a private directory beside these folders and publishes them by moving the file entries, without opening links in application-writable storage. Data and backup directories must not be symbolic links.
 
 Updater backups are limited to 12 files and 90 days by default. Override either limit for a manual or scheduled run with `BACKUP_MAX_FILES` or `BACKUP_RETENTION_DAYS`; set a value to `0` to disable that limit.
 

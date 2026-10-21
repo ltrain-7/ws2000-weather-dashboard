@@ -69,6 +69,61 @@ test("backup pruning uses filename timestamps for database and deployment archiv
 });
 
 test("guarded updater records deployment metadata only after a healthy start", (context) => {
+  runUpdaterFixture(context);
+});
+
+test("updater replaces planted metadata links without modifying their targets", (context) => {
+  runUpdaterFixture(context, (directory) => {
+    const target = path.join(directory, "host-file");
+    fs.writeFileSync(target, "must remain unchanged", { mode: 0o600 });
+    fs.symlinkSync(target, path.join(directory, "data", "deployment.json.tmp"));
+    fs.symlinkSync(target, path.join(directory, "data", "deployment.json"));
+    return () => {
+      assert.equal(fs.readFileSync(target, "utf8"), "must remain unchanged");
+      assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+      assert.equal(fs.lstatSync(path.join(directory, "data", "deployment.json")).isSymbolicLink(), false);
+    };
+  });
+});
+
+test("updater replaces metadata links to directories without writing through them", (context) => {
+  runUpdaterFixture(context, (directory) => {
+    const target = path.join(directory, "host-directory");
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, path.join(directory, "data", "deployment.json"));
+    return () => assert.deepEqual(fs.readdirSync(target), []);
+  });
+});
+
+test("updater publishes backups without opening a planted archive symlink", (context) => {
+  runUpdaterFixture(context, (directory) => {
+    const target = path.join(directory, "host-file");
+    fs.writeFileSync(target, "must remain unchanged", { mode: 0o600 });
+    fs.mkdirSync(path.join(directory, "backups"));
+    fs.symlinkSync(target, path.join(directory, "backups", "weather-data-20990101-010203.tgz"));
+    // Make the archive filename deterministic while retaining real UTC metadata dates.
+    fs.writeFileSync(path.join(directory, "date"), `#!/bin/sh
+if [ "$1" = '+%Y%m%d-%H%M%S' ]; then echo 20990101-010203; else exec /bin/date "$@"; fi
+`);
+    fs.chmodSync(path.join(directory, "date"), 0o755);
+    return () => {
+      assert.equal(fs.readFileSync(target, "utf8"), "must remain unchanged");
+      assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+      assert.equal(fs.lstatSync(path.join(directory, "backups", "weather-data-20990101-010203.tgz")).isSymbolicLink(), false);
+    };
+  });
+});
+
+test("backup pruning ignores filenames that can inject lines into its file list", (context) => {
+  runUpdaterFixture(context, (directory) => {
+    fs.writeFileSync(path.join(directory, "host-file"), "must remain unchanged");
+    fs.mkdirSync(path.join(directory, "backups"));
+    fs.writeFileSync(path.join(directory, "backups", "weather-data-\nhost-file\n.tgz"), "unrecognized archive");
+    return () => assert.equal(fs.readFileSync(path.join(directory, "host-file"), "utf8"), "must remain unchanged");
+  }, { BACKUP_MAX_FILES: "1" });
+});
+
+function runUpdaterFixture(context, prepare = () => () => {}, environment = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-updater-"));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   fs.mkdirSync(path.join(directory, "data"));
@@ -86,16 +141,19 @@ esac
 exit 0
 `);
   fs.chmodSync(docker, 0o755);
+  const verify = prepare(directory);
 
   const result = spawnSync("sh", [path.resolve(__dirname, "../scripts/update.sh")], {
     cwd: directory,
     encoding: "utf8",
-    env: { ...process.env, BACKUP_DIR: path.join(directory, "backups"), DOCKER_BIN: docker, PROJECT_DIR: directory }
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, BACKUP_DIR: path.join(directory, "backups"), DOCKER_BIN: docker, PROJECT_DIR: directory, ...environment }
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const metadata = JSON.parse(fs.readFileSync(path.join(directory, "data", "deployment.json"), "utf8"));
   assert.equal(metadata.digest, "ghcr.io/ltrain-7/ws2000-weather-dashboard@sha256:abc123");
   assert.equal(metadata.revision, "1234567890abcdef");
   assert.ok(Number.isFinite(Date.parse(metadata.updatedAt)));
-  assert.equal(fs.readdirSync(path.join(directory, "backups")).filter((name) => name.endsWith(".tgz")).length, 1);
-});
+  assert.equal(fs.readdirSync(path.join(directory, "backups")).filter((name) => /^weather-data-\d{8}-\d{6}\.tgz$/.test(name)).length, 1);
+  assert.equal(fs.readdirSync(directory).some((name) => name.startsWith(".ws2000-update.")), false);
+  verify();
+}

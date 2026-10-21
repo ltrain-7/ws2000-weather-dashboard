@@ -18,6 +18,8 @@ backup_retention_days="${BACKUP_RETENTION_DAYS:-90}"
 backup_max_files="${BACKUP_MAX_FILES:-12}"
 stamp="$(date +%Y%m%d-%H%M%S)"
 backup_file="$backup_root/weather-data-$stamp.tgz"
+backup_name="weather-data-$stamp.tgz"
+backup_pattern='weather-data-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].tgz'
 
 case "$backup_retention_days:$backup_max_files" in
   *[!0-9:]*|:*|*:)
@@ -28,12 +30,13 @@ esac
 
 prune_backups() {
   if [ "$backup_retention_days" -gt 0 ]; then
-    find "$backup_root" -maxdepth 1 -type f -name 'weather-data-*.tgz' \
+    find "$backup_root" -maxdepth 1 -type f -name "$backup_pattern" \
       -mtime "+$backup_retention_days" -delete
   fi
 
   if [ "$backup_max_files" -gt 0 ]; then
-    find "$backup_root" -maxdepth 1 -type f -name 'weather-data-*.tgz' -print \
+    # Only fixed-format names may enter this newline-delimited pipeline.
+    find "$backup_root" -maxdepth 1 -type f -name "$backup_pattern" -print \
       | sort -r \
       | awk -v keep="$backup_max_files" 'NR > keep' \
       | while IFS= read -r expired_backup; do
@@ -43,6 +46,10 @@ prune_backups() {
 }
 
 cd "$project_dir"
+if [ -L "$project_dir/data" ] || [ ! -d "$project_dir/data" ] || [ -L "$backup_root" ]; then
+  echo "Data and backup directories must be real directories, not symbolic links." >&2
+  exit 1
+fi
 mkdir -p "$backup_root"
 chmod 775 "$backup_root"
 chown 1000:1000 "$backup_root" 2>/dev/null || true
@@ -61,8 +68,15 @@ if [ -n "$old_image_id" ] && [ "$old_image_id" = "$new_image_id" ]; then
 fi
 
 echo "Creating database backup $backup_file."
+# The project directory must be host-owned and not writable by the container.
+# Never open, chmod, or chown a file under a container-writable directory.
+update_workdir="$(mktemp -d "$project_dir/.ws2000-update.XXXXXXXX")"
+trap 'rm -f -- "$update_workdir/deployment.json" "$update_workdir/$backup_name"; rmdir -- "$update_workdir"' EXIT
+trap 'exit 1' HUP INT TERM
 $docker_bin compose stop ws2000-dashboard
-tar -czf "$backup_file" data
+tar -czf "$update_workdir/$backup_name" data
+chmod 644 "$update_workdir/$backup_name"
+mv -f "$update_workdir/$backup_name" "$backup_root/"
 
 if [ -n "$old_image_id" ]; then
   $docker_bin image tag "$old_image_id" ws2000-weather-dashboard:rollback-local
@@ -82,14 +96,14 @@ if $docker_bin compose up -d --force-recreate ws2000-dashboard; then
 fi
 
 if [ "$healthy" = true ]; then
-  deployment_file="$project_dir/data/deployment.json"
-  deployment_tmp="$project_dir/data/deployment.json.tmp"
+  deployment_tmp="$update_workdir/deployment.json"
   deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '{"image":"%s","digest":"%s","revision":"%s","updatedAt":"%s"}\n' \
     "$image" "$new_image_digest" "$new_revision" "$deployed_at" > "$deployment_tmp"
-  chmod 664 "$deployment_tmp"
-  chown 1000:1000 "$deployment_tmp" 2>/dev/null || true
-  mv "$deployment_tmp" "$deployment_file"
+  chmod 644 "$deployment_tmp"
+  # A directory destination makes mv replace the final entry itself (including
+  # a symlink), instead of treating a symlink to a directory as the destination.
+  mv -f "$deployment_tmp" "$project_dir/data/"
   prune_backups
   echo "Update succeeded and passed its health check."
   exit 0

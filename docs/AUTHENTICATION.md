@@ -8,7 +8,7 @@ The dashboard can remain readable without a login while the administration page 
 - The browser receives a random session identifier in a `Secure`, `HttpOnly`, `SameSite=Strict`, host-only cookie.
 - Sessions exist only in server memory. A logout, password change, container restart, or update invalidates all sessions.
 - State-changing administration requests require both a valid session and a per-session CSRF token.
-- Repeated login failures are delayed and rate limited.
+- Login attempts are counted before password verification. Repeated failures are delayed and rate limited, with at most one password verification per client and two across the application at once. Busy clients receive HTTP 429 and can retry after the indicated delay.
 - Login, logout, and administration responses are marked `no-store` and are never placed in the service-worker cache.
 - Login is rejected unless Node is using native TLS or a specifically trusted reverse proxy reports HTTPS.
 

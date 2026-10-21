@@ -29,6 +29,8 @@ function createForecastService(options = {}) {
   let cached = null;
   let lastError = null;
   let lastFailureAt = null;
+  let pending = null;
+  let locationGeneration = 0;
 
   function useDevice(device) {
     if (!enabled || configuredLocation) return false;
@@ -39,6 +41,7 @@ function createForecastService(options = {}) {
       || location.longitude !== detected.longitude;
     location = detected;
     if (changed) {
+      locationGeneration += 1;
       cached = null;
       lastError = null;
       lastFailureAt = null;
@@ -62,16 +65,32 @@ function createForecastService(options = {}) {
       throw error;
     }
 
+    if (pending) return pending;
+    const requestedLocation = location;
+    const generation = locationGeneration;
+    pending = refresh(requestedLocation, generation, now);
     try {
-      const url = forecastUrl(origin, location, timezone, days);
+      return await pending;
+    } finally {
+      pending = null;
+    }
+  }
+
+  async function refresh(requestedLocation, generation, now) {
+    try {
+      const url = forecastUrl(origin, requestedLocation, timezone, days);
       const response = await fetchWithTimeout(fetchImpl, url, 12000);
       if (!response.ok) throw new Error(`Open-Meteo returned HTTP ${response.status}`);
       const payload = await response.json();
-      cached = normalizeForecast(payload, location, days, new Date(now).toISOString());
+      if (generation !== locationGeneration) {
+        return { enabled: true, available: false, reason: "location-changed" };
+      }
+      cached = normalizeForecast(payload, requestedLocation, days, new Date(now).toISOString());
       lastError = null;
       lastFailureAt = null;
       return { ...cached, cached: false };
     } catch (error) {
+      if (generation !== locationGeneration) throw error;
       lastError = error && error.message ? error.message : String(error);
       lastFailureAt = now;
       if (cached) return { ...cached, cached: true, stale: true };
