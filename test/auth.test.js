@@ -188,6 +188,8 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
 
   const unauthorizedStorage = await request(port, { path: "/api/storage" });
   assert.equal(unauthorizedStorage.statusCode, 401);
+  const unauthorizedBackfill = await request(port, { path: "/api/admin/backfill?days=1", method: "POST" });
+  assert.equal(unauthorizedBackfill.statusCode, 401);
 
   const publicConfig = await request(port, { path: "/api/config" });
   const configBody = JSON.parse(publicConfig.body);

@@ -12,3 +12,6 @@ npm-debug.log*
 Dockerfile.local
 .DS_Store
 .update.lock
+.update-backup-*.tgz
+.update-metadata-*.tmp
+.ws2000-update.*

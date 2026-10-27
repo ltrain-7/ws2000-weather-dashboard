@@ -156,7 +156,9 @@ After the dashboard has connected to a station, optionally backfill older readin
 docker exec ws2000-dashboard npm run backfill -- 90
 ```
 
-Replace `90` with 1–365 days. Ambient returns at most 288 readings per request and enforces rate limits, so a 90-day backfill can take several minutes. The script resumes from the oldest stored reading and safely upserts duplicates.
+Replace `90` with 1–365 days. This command starts the server's maintenance backfill job and exits; follow progress in Administration. When administrator authentication is enabled, sign in and start Backfill from that page instead. The job resumes from the oldest stored reading and safely upserts duplicates. Ambient returns at most 288 readings per request, so a 90-day import can take several minutes.
+
+History charts read stored observations and never trigger remote imports. On a new installation, use Administration's Backfill action to populate older history. All Ambient REST operations share one paced lane, a bounded pending queue, and provider-throttling backoff; identical in-flight requests are shared.
 
 ## Data persistence
 
@@ -332,7 +334,7 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 
 ## Security headers and dependency policy
 
-Public refresh requests are same-origin only, coalesced, and subject to a shared cooldown. Public history and analytics requests have per-client rate limits, while history responses and server-sent event connections also have hard resource ceilings. Set `PUBLIC_ORIGIN` behind a reverse proxy so browser Origin checks never depend on forwarding headers supplied by a client. A trusted reverse proxy must replace forwarding headers used for client addresses and HTTPS detection; the application uses the rightmost forwarded value supplied by that single proxy.
+Public refresh requests are same-origin only, coalesced, and subject to a shared cooldown. Public history reads only stored observations; remote imports run through Administration. History, analytics, and forecast requests have per-client rate limits. Live-update connections that cannot drain their output are disconnected and can reconnect for a fresh state snapshot. Set `PUBLIC_ORIGIN` behind a reverse proxy so browser Origin checks never depend on forwarding headers supplied by a client. A trusted reverse proxy must replace forwarding headers used for client addresses and HTTPS detection; the application uses the rightmost forwarded value supplied by that single proxy.
 
 The server sends a restrictive Content Security Policy, anti-framing and content-type protections, a limited browser permissions policy, cross-origin isolation headers, and HSTS when TLS or a trusted HTTPS reverse proxy is enabled. When `ADMIN_TRUST_PROXY=true`, startup fails unless `HOST` is loopback or a container deployment publishes `DASHBOARD_PORT` on loopback (for example `127.0.0.1:3000`). This prevents untrusted LAN clients from forging proxy headers that affect login rate limiting and HTTPS enforcement.
 

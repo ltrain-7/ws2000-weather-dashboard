@@ -47,7 +47,7 @@ try {
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file), [ref]$tokens, [ref]$errors) | Out-Null
         Assert ($errors.Count -eq 0) "Syntax errors in $file`: $errors"
     }
-    foreach ($global:weatherTest_scenario in @('success','current','pull-failure','backup-failure','bad-archive','unhealthy','up-failure','windows-engine','custom-mount')) {
+    foreach ($global:weatherTest_scenario in @('success','current','pull-failure','backup-failure','bad-archive','unhealthy','up-failure','windows-engine','custom-mount','metadata-temp-hardlink','metadata-hardlink','metadata-junction')) {
         $global:weatherTest_project = Join-Path $root $global:weatherTest_scenario
         New-Item -ItemType Directory -Path (Join-Path $global:weatherTest_project 'profiles') -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo 'profiles/pi-performance.env') -Destination (Join-Path $global:weatherTest_project 'profiles')
@@ -59,6 +59,21 @@ try {
         Assert ([IO.File]::ReadAllText($envPath).Contains('# preserved')) 'Setup overwrote existing configuration.'
         $metadata = Join-Path $global:weatherTest_project 'data/deployment.json'
         [IO.File]::WriteAllText($metadata, '{"revision":"old"}')
+        $protectedFile = Join-Path $global:weatherTest_project 'outside-data.json'
+        [IO.File]::WriteAllText($protectedFile, '{"revision":"old","marker":"untouched"}')
+        if ($global:weatherTest_scenario -eq 'metadata-temp-hardlink') {
+            New-Item -ItemType HardLink -Path "$metadata.tmp" -Value $protectedFile | Out-Null
+        }
+        if ($global:weatherTest_scenario -eq 'metadata-hardlink') {
+            [IO.File]::Delete($metadata)
+            New-Item -ItemType HardLink -Path $metadata -Value $protectedFile | Out-Null
+        }
+        if ($global:weatherTest_scenario -eq 'metadata-junction') {
+            [IO.File]::Delete($metadata)
+            $protectedDirectory = Join-Path $global:weatherTest_project 'outside-data'
+            New-Item -ItemType Directory -Path $protectedDirectory | Out-Null
+            New-Item -ItemType Junction -Path $metadata -Value $protectedDirectory | Out-Null
+        }
         $global:weatherTest_calls = New-Object 'Collections.Generic.List[string]'
         $global:weatherTest_rollback = $false
         $failed = $false
@@ -67,8 +82,17 @@ try {
             & (Join-Path $repo 'scripts/update.ps1') -ProjectDir $global:weatherTest_project -DockerBin Test-Docker -TarBin Test-Tar
         } catch { $failed = $true; Write-Host "Update result: $_" }
         Assert ($env:WS2000_IMAGE -eq 'original-environment') 'Updater leaked its rollback image override.'
+        Assert ([IO.File]::ReadAllText($protectedFile) -eq '{"revision":"old","marker":"untouched"}') 'Updater wrote through a metadata link.'
+        Assert (@(Get-ChildItem -LiteralPath $global:weatherTest_project -Filter '.update-*' -File).Count -eq 0) 'Updater leaked staged files.'
+        if ($global:weatherTest_scenario -eq 'metadata-junction') {
+            Assert $failed 'Updater should refuse replacing a directory with a file.'
+            Assert (@(Get-ChildItem -LiteralPath $protectedDirectory).Count -eq 0) 'Updater wrote into the junction target.'
+            [IO.Directory]::Delete($metadata)
+            Write-Host 'PASS: metadata-junction'
+            continue
+        }
         $result = Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json
-        if ($global:weatherTest_scenario -eq 'success') {
+        if ($global:weatherTest_scenario -in @('success','metadata-temp-hardlink','metadata-hardlink')) {
             Assert (-not $failed) 'Successful update threw.'
             Assert ($result.image -eq 'example/weather:configured') 'Updater ignored the Compose image.'
             Assert ($result.revision -eq 'revision123') 'Missing deployment revision.'
