@@ -10,3 +10,6 @@ backup*
 *.db
 *.db-shm
 *.db-wal
+.update-backup-*.tgz
+.update-metadata-*.tmp
+.ws2000-update.*

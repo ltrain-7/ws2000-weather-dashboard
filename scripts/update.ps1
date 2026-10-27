@@ -8,6 +8,29 @@ param(
     [ValidateRange(0, 2147483647)][int]$BackupMaxFiles = 12
 )
 $ErrorActionPreference = 'Stop'
+# Rename entries on the same volume; never copy through a destination link.
+if (-not ('WeatherDashboard.SafeFiles' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+namespace WeatherDashboard {
+    public static class SafeFiles {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool MoveFileEx(string source, string destination, int flags);
+    }
+}
+'@
+}
+function Publish-StagedFile {
+    param([string]$Source, [string]$Destination, [switch]$Replace)
+    # No COPY_ALLOWED fallback: a failed rename must never become a link-following copy.
+    $flags = 8 # MOVEFILE_WRITE_THROUGH
+    if ($Replace) { $flags = $flags -bor 1 } # MOVEFILE_REPLACE_EXISTING
+    if (-not [WeatherDashboard.SafeFiles]::MoveFileEx($Source, $Destination, $flags)) {
+        $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw (New-Object ComponentModel.Win32Exception $code)
+    }
+}
 # Native programs report failure via LASTEXITCODE in Windows PowerShell 5.1.
 function Invoke-Docker {
     param([string[]]$Arguments)
@@ -50,6 +73,8 @@ $recreated = $false
 $healthy = $false
 $oldImage = $null
 $lock = $null
+$metadataStage = $null
+$backupStage = $null
 Push-Location -LiteralPath $ProjectDir
 try {
     # This handle prevents overlapping scheduled/manual PowerShell updates.
@@ -80,6 +105,9 @@ try {
         throw 'The data directory must be a real local folder, not a link or junction.'
     }
     New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    if ((Get-Item -LiteralPath $backupRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'The backup directory must be a real local folder, not a link or junction.'
+    }
     $containers = @(Invoke-Docker @('compose', 'ps', '-a', '-q', 'ws2000-dashboard'))
     if ($containers.Count -gt 0) {
         $oldImage = Invoke-Docker @('inspect', '--format', '{{.Image}}', 'ws2000-dashboard')
@@ -97,12 +125,17 @@ try {
     if ($oldImage) { Invoke-Docker @('image', 'tag', $oldImage, 'ws2000-weather-dashboard:rollback-local') | Out-Host }
     $backupFile = Join-Path $backupRoot ("weather-data-{0}.tgz" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     if (Test-Path -LiteralPath $backupFile) { throw 'A backup with this timestamp already exists. Retry in a moment.' }
+    # The project root is host-controlled and is not mounted into the container.
+    $backupStage = Join-Path $ProjectDir ('.update-backup-' + [Guid]::NewGuid() + '.tgz')
+    $reservation = [IO.File]::Open($backupStage, 'CreateNew', 'Write', 'None')
+    $reservation.Dispose()
     Invoke-Docker @('compose', 'stop', 'ws2000-dashboard') | Out-Host
     $stopped = $true
-    & $TarBin '-czf' $backupFile '-C' $ProjectDir 'data'
+    & $TarBin '-czf' $backupStage '-C' $ProjectDir 'data'
     if ($LASTEXITCODE -ne 0) { throw 'Backup failed; the new image will not be started.' }
-    & $TarBin '-tzf' $backupFile | Out-Null
+    & $TarBin '-tzf' $backupStage | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Backup verification failed; the new image will not be started.' }
+    Publish-StagedFile -Source $backupStage -Destination $backupFile
     $recreated = $true
     Invoke-Docker @('compose', 'up', '-d', '--force-recreate', 'ws2000-dashboard') | Out-Host
     if (-not (Wait-DashboardHealth)) { throw 'Updated container failed its health check.' }
@@ -112,8 +145,14 @@ try {
         updatedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
     } | ConvertTo-Json
     $metadataFile = Join-Path $ProjectDir 'data/deployment.json'
-    [IO.File]::WriteAllText("$metadataFile.tmp", $metadata, (New-Object Text.UTF8Encoding $false))
-    Move-Item -LiteralPath "$metadataFile.tmp" -Destination $metadataFile -Force
+    $metadataStage = Join-Path $ProjectDir ('.update-metadata-' + [Guid]::NewGuid() + '.tmp')
+    $stream = [IO.File]::Open($metadataStage, 'CreateNew', 'Write', 'None')
+    try {
+        $bytes = (New-Object Text.UTF8Encoding $false).GetBytes($metadata)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    } finally { $stream.Dispose() }
+    Publish-StagedFile -Source $metadataStage -Destination $metadataFile -Replace
     Remove-ExpiredBackups
     Write-Host 'Update succeeded and passed its health check.'
 } catch {
@@ -141,6 +180,9 @@ try {
     }
     throw $failure
 } finally {
+    foreach ($stage in @($metadataStage, $backupStage)) {
+        if ($stage -and [IO.File]::Exists($stage)) { [IO.File]::Delete($stage) }
+    }
     $env:WS2000_IMAGE = $oldImageEnvironment
     if ($lock) { $lock.Dispose() }
     Pop-Location

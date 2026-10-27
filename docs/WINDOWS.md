@@ -47,6 +47,8 @@ After a healthy update, Administration shows the deployed image digest, revision
 
 Scripts find the project relative to their own location, so paths with spaces and calls from another directory work. Use `-ProjectDir` for another standard project directory. The updater requires the standard local `data` and `backups` bind mounts; it refuses custom mounts instead of backing up the wrong directory. Run only one updater at a time; overlapping PowerShell runs are locked out.
 
+Keep the project root controlled by the host user and outside container-writable mounts. The updater exclusively creates randomly named staging files there, verifies the archive, and publishes files through same-volume Windows renames. It never opens `data/deployment.json.tmp` and does not fall back to copying through a destination link. Data and backup folders must be real local directories. A directory or junction in place of the deployment metadata causes publication to fail safely.
+
 ## Scheduled updates and startup
 
 Docker Desktop must be running for the dashboard or its updater to work. Enable Docker Desktop's sign-in startup option if desired. A sleeping or signed-out PC is not an always-on weather host.

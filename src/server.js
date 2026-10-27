@@ -3,6 +3,8 @@ const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
 const { AdminAuth, safeStringEqual } = require("./auth");
+const { createAmbientRestClient } = require("./ambient-rest");
+const { EventClient } = require("./event-client");
 const { createDeploymentStatus } = require("./deployment-status");
 const { createUpdateStatus } = require("./update-status");
 const { createForecastService } = require("./forecast");
@@ -104,6 +106,7 @@ const publicQueryLimiter = new RequestRateLimiter({
   maxRequests: PUBLIC_QUERY_RATE_LIMIT,
   windowMs: PUBLIC_QUERY_RATE_WINDOW_MS
 });
+const ambientRest = createAmbientRestClient({ fetchJson });
 const authCleanupTimer = ADMIN_AUTH_ENABLED
   ? setInterval(() => adminAuth.sweep(), 5 * 60 * 1000)
   : null;
@@ -413,6 +416,11 @@ async function handleApi(req, res, requestUrl) {
 }
 
 async function handleHistory(res, requestUrl) {
+  const source = clean(requestUrl.searchParams.get("source"));
+  if (source && source !== "local") {
+    sendJson(res, 400, { error: "History reads stored observations. Use Administration backfill to import Ambient history." });
+    return;
+  }
   const requestedMac = clean(requestUrl.searchParams.get("mac"));
   const macAddress = requestedMac || DEFAULT_DEVICE_MAC || firstKnownMac();
   if (!macAddress) {
@@ -437,8 +445,6 @@ async function handleHistory(res, requestUrl) {
     throw error;
   }
   const maxPoints = clamp(Number(requestUrl.searchParams.get("maxPoints") || 0), 0, 2000);
-  const source = clean(requestUrl.searchParams.get("source"));
-  const apiKey = apiKeyByMac.get(macAddress) || API_KEYS[0];
   const localHistory = readLocalHistory(macAddress, {
     limit,
     startDate,
@@ -446,48 +452,12 @@ async function handleHistory(res, requestUrl) {
     maxPoints
   });
 
-  if (source !== "ambient" && (localHistory.length >= limit || !configured || source === "local")) {
-    sendJson(res, 200, {
-      macAddress,
-      source: storage.enabled ? "sqlite" : "memory",
-      count: localHistory.length,
-      data: localHistory
-    });
-    return;
-  }
-
-  try {
-    const ambientLimit = clamp(limit, 1, 288);
-    const history = await fetchDeviceHistory(macAddress, apiKey, { limit: ambientLimit, endDate });
-    for (const item of history) {
-      const sanitized = sanitizeData({ ...item, macAddress }, macAddress);
-      persistReading(sanitized, "ambient-history");
-    }
-    let mergedHistory = storage.enabled
-      ? readLocalHistory(macAddress, { limit, startDate, endDate, maxPoints })
-      : [];
-    let responseSource = storage.enabled ? "sqlite+ambient-backfill" : "rest";
-    if (!mergedHistory.length) {
-      mergedHistory = history.map((item) => sanitizeData(item, macAddress));
-      responseSource = "rest";
-    }
-
-    sendJson(res, 200, {
-      macAddress,
-      source: responseSource,
-      count: mergedHistory.length,
-      data: mergedHistory
-    });
-  } catch (error) {
-    recordError(error);
-    sendJson(res, localHistory.length ? 200 : 502, {
-      error: "Unable to fetch Ambient device history.",
-      source: storage.enabled ? "sqlite-fallback" : "memory-fallback",
-      count: localHistory.length,
-      data: localHistory,
-      fallback: liveHistoryFor(macAddress)
-    });
-  }
+  sendJson(res, 200, {
+    macAddress,
+    source: storage.enabled ? "sqlite" : "memory",
+    count: localHistory.length,
+    data: localHistory
+  });
 }
 
 async function refreshDevicesManually() {
@@ -632,7 +602,7 @@ async function fetchUserDevices(apiKey) {
   const url = new URL("/v1/devices", REST_ORIGIN);
   url.searchParams.set("apiKey", apiKey);
   url.searchParams.set("applicationKey", APPLICATION_KEY);
-  return fetchJson(url);
+  return ambientRest.request(url);
 }
 
 async function fetchDeviceHistory(macAddress, apiKey, options) {
@@ -643,7 +613,7 @@ async function fetchDeviceHistory(macAddress, apiKey, options) {
   if (options.endDate) {
     url.searchParams.set("endDate", options.endDate);
   }
-  return fetchJson(url);
+  return ambientRest.request(url);
 }
 
 async function fetchJson(url) {
@@ -661,9 +631,19 @@ async function fetchJson(url) {
     const body = await response.text();
 
     if (!response.ok) {
-      throw new Error(
+      const error = new Error(
         `Ambient API returned ${response.status}: ${body.slice(0, 180) || response.statusText}`
       );
+      // Provider errors may contain private request details: expose no raw 4xx
+      // payload through the public refresh endpoint's client-error handler.
+      error.statusCode = 502;
+      error.providerStatus = response.status;
+      const retryAfter = response.headers.get("retry-after");
+      const seconds = Number(retryAfter);
+      error.retryAfterMs = retryAfter && Number.isFinite(seconds)
+        ? Math.max(0, seconds * 1000)
+        : Math.max(0, Date.parse(retryAfter || "") - Date.now()) || 0;
+      throw error;
     }
 
     return body ? JSON.parse(body) : null;
@@ -1259,31 +1239,16 @@ function openEventStream(req, res) {
     "x-accel-buffering": "no",
     ...securityHeaders()
   });
-  res.write(": connected\n\n");
-
-  const client = { address, res };
+  const client = new EventClient(res, { address, onClose: (closed) => clients.delete(closed) });
   clients.add(client);
-  sendEvent(client, "state", publicState());
-
-  const heartbeat = setInterval(() => {
-    res.write(": heartbeat\n\n");
-  }, 25000);
-
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    clients.delete(client);
-  });
+  req.once("close", () => client.close());
+  client.start(publicState());
 }
 
 function broadcast(event, payload) {
   for (const client of clients) {
-    sendEvent(client, event, payload);
+    client.send(event, payload);
   }
-}
-
-function sendEvent(client, event, payload) {
-  client.res.write(`event: ${event}\n`);
-  client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function recordError(error) {
