@@ -13,12 +13,18 @@ test("public history cannot invoke Ambient, while maintenance backfill still imp
   let historyCalls = 0;
   const provider = http.createServer((req, res) => {
     res.setHeader("content-type", "application/json");
-    if (new URL(req.url, "http://fixture").pathname === "/v1/devices") {
+    const pathname = new URL(req.url, "http://fixture").pathname;
+    if (pathname === "/v1/devices") {
       deviceCalls += 1;
       res.end(JSON.stringify([{ macAddress: "fixture", info: { name: "Fixture" }, lastData: { dateutc: now, tempf: 70 } }]));
-    } else {
+    } else if (pathname === "/v1/devices/fixture") {
       historyCalls += 1;
       res.end(JSON.stringify([{ dateutc: now - 2 * 86400000, tempf: 60 }]));
+    } else {
+      // With dependencies installed the realtime client also attempts a local
+      // WebSocket handshake. It is unrelated to REST history quota accounting.
+      res.statusCode = 404;
+      res.end("{}");
     }
   });
   context.after(() => { provider.closeAllConnections(); provider.close(); });
