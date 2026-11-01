@@ -170,6 +170,29 @@ async function testDashboardInteractions(browser) {
   assert.ok(Math.max(...firstRow) - Math.min(...firstRow) < 2, "The first three mobile ranges should share a row.");
   assert.ok(secondRow.y > firstRow[0] + 20, "The remaining mobile ranges should use a second row.");
 
+  await page.getByRole("button", { name: "Customize dashboard", exact: true }).click();
+  await page.getByRole("button", { name: "Move History chart up", exact: true }).click();
+  assert.deepEqual(
+    await page.locator("#dashboardModules > [data-dashboard-module]").evaluateAll((modules) => modules.map((module) => module.dataset.dashboardModule)),
+    ["current", "conditions", "history", "forecast", "insights"]
+  );
+  await page.getByRole("button", { name: "Hide Local forecast", exact: true }).click();
+  await page.getByRole("button", { name: "Add Local forecast", exact: true }).waitFor();
+  assert.equal(await page.locator('[data-dashboard-module="forecast"]').isVisible(), false);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  assert.deepEqual(
+    await page.locator("#dashboardModules > [data-dashboard-module]").evaluateAll((modules) => modules.map((module) => module.dataset.dashboardModule)),
+    ["current", "conditions", "history", "forecast", "insights"]
+  );
+  assert.equal(await page.locator('[data-dashboard-module="forecast"]').isVisible(), false);
+  await page.getByRole("button", { name: "Customize dashboard", exact: true }).click();
+  await page.getByRole("button", { name: "Add Local forecast", exact: true }).click();
+  await page.getByRole("button", { name: "Reset layout", exact: true }).click();
+  assert.deepEqual(
+    await page.locator("#dashboardModules > [data-dashboard-module]").evaluateAll((modules) => modules.map((module) => module.dataset.dashboardModule)),
+    ["current", "conditions", "forecast", "history", "insights"]
+  );
+
   await context.close();
 }
 

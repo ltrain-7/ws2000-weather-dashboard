@@ -18,9 +18,12 @@ const state = {
   forecastLoading: false,
   forecastRetries: 0,
   eventStreamFailures: 0,
-  eventStreamDisconnectedAt: null
+  eventStreamDisconnectedAt: null,
+  dashboardLayout: null,
+  layoutEditing: false
 };
 const historyTime = window.WeatherHistoryTime;
+const dashboardLayout = window.WeatherDashboardLayout;
 
 let chartModel = null;
 
@@ -32,6 +35,13 @@ const els = {
   setupBanner: document.getElementById("setupBanner"),
   updateBanner: document.getElementById("updateBanner"),
   reloadUpdate: document.getElementById("reloadUpdate"),
+  customizeDashboard: document.getElementById("customizeDashboard"),
+  layoutEditor: document.getElementById("layoutEditor"),
+  finishDashboardLayout: document.getElementById("finishDashboardLayout"),
+  resetDashboardLayout: document.getElementById("resetDashboardLayout"),
+  hiddenModules: document.getElementById("hiddenModules"),
+  layoutStatus: document.getElementById("layoutStatus"),
+  dashboardModules: document.getElementById("dashboardModules"),
   healthBanner: document.getElementById("healthBanner"),
   healthTitle: document.getElementById("healthTitle"),
   healthDetail: document.getElementById("healthDetail"),
@@ -85,6 +95,7 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   bindEvents();
+  initDashboardLayout();
   setMetricButtons();
   setInsightTab(state.insightTab);
   configureResponsiveDisclosures();
@@ -106,6 +117,208 @@ async function init() {
     els.healthDetail.textContent = error.message;
     renderEmpty();
   }
+}
+
+function initDashboardLayout() {
+  if (!dashboardLayout || !els.dashboardModules) return;
+  const modules = dashboardModuleElements();
+  const moduleIds = modules.map((module) => module.dataset.dashboardModule);
+  state.dashboardLayout = dashboardLayout.loadLayout(localStorage, moduleIds);
+
+  for (const module of modules) {
+    const controls = createModuleControls(module);
+    const summary = module.matches("details") ? module.querySelector(":scope > summary") : null;
+    if (summary) summary.after(controls);
+    else module.prepend(controls);
+    bindModuleDrag(module, controls.querySelector("[data-layout-drag]"));
+  }
+
+  els.customizeDashboard.addEventListener("click", () => {
+    setLayoutEditing(!state.layoutEditing);
+  });
+  els.finishDashboardLayout.addEventListener("click", () => setLayoutEditing(false));
+  els.resetDashboardLayout.addEventListener("click", () => {
+    localStorage.removeItem(dashboardLayout.STORAGE_KEY);
+    state.dashboardLayout = dashboardLayout.normalizeLayout(null, moduleIds);
+    applyDashboardLayout();
+    announceLayout("Dashboard layout reset to the default order.");
+  });
+  applyDashboardLayout();
+}
+
+function dashboardModuleElements() {
+  return Array.from(els.dashboardModules.querySelectorAll(":scope > [data-dashboard-module]"));
+}
+
+function createModuleControls(module) {
+  const title = module.dataset.moduleTitle || module.dataset.dashboardModule;
+  const controls = document.createElement("div");
+  controls.className = "module-layout-controls";
+  controls.setAttribute("aria-label", `${title} layout controls`);
+  controls.innerHTML = `
+    <button class="module-drag-handle" type="button" draggable="true" data-layout-drag aria-label="Drag ${escapeHtml(title)}">⋮⋮</button>
+    <strong>${escapeHtml(title)}</strong>
+    <span class="module-layout-buttons">
+      <button type="button" data-layout-move="-1" aria-label="Move ${escapeHtml(title)} up">↑</button>
+      <button type="button" data-layout-move="1" aria-label="Move ${escapeHtml(title)} down">↓</button>
+      <button type="button" data-layout-hide aria-label="Hide ${escapeHtml(title)}">Hide</button>
+    </span>`;
+  controls.querySelectorAll("[data-layout-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.dashboardLayout = dashboardLayout.moveModule(
+        state.dashboardLayout,
+        module.dataset.dashboardModule,
+        Number(button.dataset.layoutMove)
+      );
+      applyDashboardLayout();
+      announceLayout(`${title} moved ${Number(button.dataset.layoutMove) < 0 ? "up" : "down"}.`);
+    });
+  });
+  controls.querySelector("[data-layout-hide]").addEventListener("click", () => {
+    const visibleCount = state.dashboardLayout.order.length - state.dashboardLayout.hidden.length;
+    if (visibleCount <= 1) {
+      announceLayout("At least one dashboard module must remain visible.");
+      return;
+    }
+    state.dashboardLayout = dashboardLayout.setModuleHidden(
+      state.dashboardLayout,
+      module.dataset.dashboardModule,
+      true
+    );
+    applyDashboardLayout();
+    announceLayout(`${title} hidden.`);
+  });
+  return controls;
+}
+
+function bindModuleDrag(module, handle) {
+  handle.addEventListener("dragstart", (event) => {
+    if (!state.layoutEditing) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", module.dataset.dashboardModule);
+    module.classList.add("module-dragging");
+  });
+  handle.addEventListener("dragend", () => {
+    module.classList.remove("module-dragging");
+    dashboardModuleElements().forEach((item) => item.classList.remove("module-drag-target"));
+  });
+  module.addEventListener("dragover", (event) => {
+    if (!state.layoutEditing) return;
+    event.preventDefault();
+    module.classList.add("module-drag-target");
+  });
+  module.addEventListener("dragleave", () => module.classList.remove("module-drag-target"));
+  module.addEventListener("drop", (event) => {
+    event.preventDefault();
+    module.classList.remove("module-drag-target");
+    const source = els.dashboardModules.querySelector(
+      `[data-dashboard-module="${cssEscape(event.dataTransfer.getData("text/plain"))}"]`
+    );
+    if (!source || source === module) return;
+    const belowMidpoint = event.clientY > module.getBoundingClientRect().top + module.getBoundingClientRect().height / 2;
+    module[belowMidpoint ? "after" : "before"](source);
+    state.dashboardLayout.order = dashboardModuleElements().map((item) => item.dataset.dashboardModule);
+    persistDashboardLayout();
+    updateModuleControls();
+    announceLayout(`${source.dataset.moduleTitle || "Module"} moved.`);
+  });
+}
+
+function applyDashboardLayout() {
+  const modules = new Map(dashboardModuleElements().map((module) => [module.dataset.dashboardModule, module]));
+  for (const id of state.dashboardLayout.order) {
+    if (modules.has(id)) els.dashboardModules.append(modules.get(id));
+  }
+  const hidden = new Set(state.dashboardLayout.hidden);
+  for (const [id, module] of modules) {
+    module.classList.toggle("module-user-hidden", hidden.has(id));
+    if (hidden.has(id)) module.setAttribute("aria-hidden", "true");
+    else module.removeAttribute("aria-hidden");
+  }
+  persistDashboardLayout();
+  renderHiddenModules();
+  updateModuleControls();
+}
+
+function persistDashboardLayout() {
+  try {
+    dashboardLayout.saveLayout(localStorage, state.dashboardLayout);
+  } catch {}
+}
+
+function renderHiddenModules() {
+  els.hiddenModules.replaceChildren();
+  const hidden = new Set(state.dashboardLayout.hidden);
+  const modules = dashboardModuleElements().filter((module) => hidden.has(module.dataset.dashboardModule));
+  if (!modules.length) {
+    const empty = document.createElement("span");
+    empty.className = "muted";
+    empty.textContent = "None";
+    els.hiddenModules.append(empty);
+    return;
+  }
+  for (const module of modules) {
+    const button = document.createElement("button");
+    button.className = "layout-action";
+    button.type = "button";
+    button.textContent = `Add ${module.dataset.moduleTitle || module.dataset.dashboardModule}`;
+    button.addEventListener("click", () => {
+      state.dashboardLayout = dashboardLayout.setModuleHidden(
+        state.dashboardLayout,
+        module.dataset.dashboardModule,
+        false
+      );
+      applyDashboardLayout();
+      announceLayout(`${module.dataset.moduleTitle || "Module"} added.`);
+    });
+    els.hiddenModules.append(button);
+  }
+}
+
+function updateModuleControls() {
+  const visibleCount = state.dashboardLayout.order.length - state.dashboardLayout.hidden.length;
+  dashboardModuleElements().forEach((module) => {
+    const id = module.dataset.dashboardModule;
+    const index = state.dashboardLayout.order.indexOf(id);
+    const controls = module.querySelector(":scope > .module-layout-controls");
+    if (!controls) return;
+    controls.querySelector('[data-layout-move="-1"]').disabled = index <= 0;
+    controls.querySelector('[data-layout-move="1"]').disabled = index >= state.dashboardLayout.order.length - 1;
+    controls.querySelector("[data-layout-hide]").disabled = visibleCount <= 1;
+  });
+}
+
+function setLayoutEditing(editing) {
+  state.layoutEditing = editing;
+  els.layoutEditor.hidden = !editing;
+  els.customizeDashboard.setAttribute("aria-expanded", String(editing));
+  els.customizeDashboard.textContent = editing ? "Editing dashboard" : "Customize dashboard";
+  els.dashboardModules.classList.toggle("layout-editing", editing);
+  if (editing) els.layoutEditor.querySelector("button")?.focus();
+  else els.customizeDashboard.focus();
+}
+
+function announceLayout(message) {
+  els.layoutStatus.textContent = "";
+  window.requestAnimationFrame(() => {
+    els.layoutStatus.textContent = message;
+  });
+}
+
+function cssEscape(value) {
+  return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;"
+  })[character]);
 }
 
 function bindEvents() {
