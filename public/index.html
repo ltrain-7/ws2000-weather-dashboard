@@ -9,7 +9,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <link rel="stylesheet" href="/styles.css?v=1.10.3">
+    <link rel="stylesheet" href="/styles.css?v=1.11.0">
   </head>
   <body>
     <main class="app-shell">
@@ -54,7 +54,28 @@
         <button id="reloadUpdate" class="icon-button" type="button">Reload now</button>
       </section>
 
-      <section class="current-conditions" aria-labelledby="currentConditionsTitle">
+      <div class="layout-toolbar">
+        <button id="customizeDashboard" class="layout-customize" type="button" aria-expanded="false" aria-controls="layoutEditor">Customize dashboard</button>
+        <p id="layoutStatus" class="visually-hidden" aria-live="polite"></p>
+      </div>
+      <aside id="layoutEditor" class="layout-editor" aria-labelledby="layoutEditorTitle" hidden>
+        <div>
+          <p class="eyebrow">Layout</p>
+          <h2 id="layoutEditorTitle">Customize dashboard</h2>
+          <p>Drag modules or use their arrow buttons to reorder them. Hidden modules stay available below.</p>
+        </div>
+        <div class="layout-editor-actions">
+          <button id="resetDashboardLayout" class="layout-action" type="button">Reset layout</button>
+          <button id="finishDashboardLayout" class="layout-action primary" type="button">Done</button>
+        </div>
+        <div class="hidden-modules">
+          <strong>Hidden modules</strong>
+          <div id="hiddenModules" class="hidden-module-list"><span class="muted">None</span></div>
+        </div>
+      </aside>
+
+      <div id="dashboardModules" class="dashboard-modules">
+      <section id="currentConditionsModule" class="current-conditions dashboard-module" aria-labelledby="currentConditionsTitle" data-dashboard-module="current" data-module-title="Current conditions">
         <h2 id="currentConditionsTitle" class="visually-hidden">Current conditions</h2>
         <div class="primary-reading">
           <div>
@@ -74,7 +95,7 @@
         </div>
       </section>
 
-      <details id="moreConditions" class="more-conditions" open>
+      <details id="moreConditions" class="more-conditions dashboard-module" data-dashboard-module="conditions" data-module-title="More conditions" open>
         <summary>More conditions</summary>
         <div class="secondary-grid">
           <article class="metric-card"><span class="metric-label">Indoor</span><strong id="indoorValue">--</strong><small id="indoorHumidityValue">Humidity --</small></article>
@@ -84,7 +105,7 @@
         </div>
       </details>
 
-      <section id="forecastSection" class="forecast-section" aria-labelledby="forecastTitle" hidden>
+      <section id="forecastSection" class="forecast-section dashboard-module" aria-labelledby="forecastTitle" data-dashboard-module="forecast" data-module-title="Local forecast" hidden>
         <div class="forecast-header">
           <div><p class="eyebrow">Forecast</p><h2 id="forecastTitle">Local outlook</h2></div>
           <p id="forecastStatus" class="forecast-status" aria-live="polite">Loading forecast…</p>
@@ -93,7 +114,7 @@
         <p class="forecast-attribution"><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Weather data by Open-Meteo</a></p>
       </section>
 
-      <section class="chart-section">
+      <section id="historyModule" class="chart-section dashboard-module" data-dashboard-module="history" data-module-title="History chart">
         <div class="history-header">
           <div class="history-heading"><p class="eyebrow">History</p><h2 id="chartTitle">Last 24 hours</h2></div>
           <div class="segmented" role="tablist" aria-label="Chart metric">
@@ -142,7 +163,7 @@
         </details>
       </section>
 
-      <section class="insights-section" aria-labelledby="insightsTitle">
+      <section id="insightsModule" class="insights-section dashboard-module" aria-labelledby="insightsTitle" data-dashboard-module="insights" data-module-title="Historical insights">
         <div class="insights-header">
           <div><p class="eyebrow">Insights</p><h2 id="insightsTitle">Period details</h2></div>
           <div class="insight-tabs" role="tablist" aria-label="Historical insights">
@@ -163,10 +184,12 @@
           <div id="rainfallGrid" class="stat-grid"><p class="muted">Waiting for stored rainfall data.</p></div>
         </article>
       </section>
+      </div>
     </main>
-    <script src="/history-time.js?v=1.10.3" defer></script>
-    <script src="/insights.js?v=1.10.3" defer></script>
-    <script src="/forecast.js?v=1.10.3" defer></script>
-    <script src="/app.js?v=1.10.3" defer></script>
+    <script src="/history-time.js?v=1.11.0" defer></script>
+    <script src="/insights.js?v=1.11.0" defer></script>
+    <script src="/forecast.js?v=1.11.0" defer></script>
+    <script src="/layout.js?v=1.11.0" defer></script>
+    <script src="/app.js?v=1.11.0" defer></script>
   </body>
 </html>

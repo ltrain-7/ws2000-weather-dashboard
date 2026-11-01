@@ -50,6 +50,10 @@ Use Docker Desktop with its WSL 2 backend and Linux containers. See the [Windows
 
 The local forecast is enabled automatically and normally uses the station location supplied privately by Ambient Weather. The server sends those coordinates to Open-Meteo to request the forecast, but never exposes them to the browser. If your station metadata has no location, set `FORECAST_LATITUDE` and `FORECAST_LONGITUDE` in `.env`.
 
+### Customizing the dashboard
+
+Choose **Customize dashboard** to reorder, hide, or restore the current-conditions, secondary-conditions, forecast, history, and insights modules. Modules can be dragged with a pointer or moved with the accessible arrow buttons. The layout is stored in that browser, new modules are added automatically when the application registers them, and **Reset layout** restores the shipped order without affecting weather data or server settings.
+
 Open `/admin.html` to view application, deployment, connection, station, storage, backup, and backfill status. A deployment performed by the guarded updater records the exact image digest, revision, and successful update time. The page never returns Ambient API key values.
 
 For HTTPS on Synology DSM or Raspberry Pi/Linux, see [HTTPS and TLS setup](docs/HTTPS.md).

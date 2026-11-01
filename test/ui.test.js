@@ -59,6 +59,9 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(dashboard, /aria-describedby="chartSummary chartMessage"/);
   assert.match(dashboard, /id="chartDataTable"/);
   assert.match(dashboard, /id="forecastSection"[^>]*aria-labelledby="forecastTitle"/);
+  assert.match(dashboard, /id="dashboardModules"/);
+  assert.match(dashboard, /data-dashboard-module="current"/);
+  assert.match(dashboard, /id="customizeDashboard"[^>]*aria-controls="layoutEditor"/);
   assert.match(dashboard, /Weather data by Open-Meteo/);
   assert.match(forecast, /accessibleLabel/);
   assert.match(script, /addEventListener\("keydown"/);
@@ -72,6 +75,8 @@ test("dashboard controls retain accessible interaction states", () => {
   assert.match(script, /Partial range:/);
   assert.match(script, /Still reconnecting/);
   assert.match(script, /function hasNumericValue/);
+  assert.match(script, /dashboardLayout\.moveModule/);
+  assert.match(script, /data-layout-drag/);
   assert.match(historyTime, /zonedTimeToUtc/);
   assert.match(worker, /event\.request\.mode === "navigate"/);
   assert.match(styles, /:focus-visible/);
@@ -91,6 +96,7 @@ test("release version and service-worker assets stay synchronized", () => {
   assert.match(dashboard, new RegExp(`history-time\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`insights\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`forecast\\.js\\?v=${version}`));
+  assert.match(dashboard, new RegExp(`layout\\.js\\?v=${version}`));
   assert.match(dashboard, new RegExp(`app\\.js\\?v=${version}`));
   assert.match(admin, new RegExp(`styles\\.css\\?v=${version}`));
   assert.match(admin, new RegExp(`admin\\.js\\?v=${version}`));
@@ -101,6 +107,7 @@ test("release version and service-worker assets stay synchronized", () => {
   assert.match(worker, new RegExp(`history-time\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`insights\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`forecast\\.js\\?v=${version}`));
+  assert.match(worker, new RegExp(`layout\\.js\\?v=${version}`));
   assert.match(worker, new RegExp(`app\\.js\\?v=${version}`));
   assert.doesNotMatch(worker, new RegExp(`(?:admin|login)\\.js\\?v=${version}`));
 });
