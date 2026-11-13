@@ -1,4 +1,4 @@
-const CACHE_NAME = "ws2000-v1.11.0-weather-fixes";
+const CACHE_NAME = "ws2000-v1.11.0-admin-protection";
 const STATIC_ASSETS = ["/", "/index.html", "/styles.css?v=1.11.0", "/history-time.js?v=1.11.0", "/insights.js?v=1.11.0", "/forecast.js?v=1.11.0", "/layout.js?v=1.11.0", "/app.js?v=1.11.0", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -16,6 +16,11 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   if (event.request.mode === "navigate") {
+    // Only the public dashboard has an offline navigation fallback.
+    if (url.pathname !== "/" && url.pathname !== "/index.html") {
+      event.respondWith(fetch(event.request));
+      return;
+    }
     event.respondWith(fetch(event.request).then((response) => {
       if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
       return response;

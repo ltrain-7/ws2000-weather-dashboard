@@ -83,7 +83,7 @@ const MAX_EVENT_CLIENTS_PER_ADDRESS = clamp(
 );
 const ADMIN_COOKIE_NAME = "__Host-weather_session";
 const PROTECTED_ADMIN_ASSETS = new Set(["/admin.html", "/admin.js"]);
-const { redirect, redirectPermanent, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
+const { redirect, redirectPermanent, resolveStaticPath, securityHeaders, sendJson, sendText, serveStatic } = createHttpResponder({
   publicDir: PUBLIC_DIR,
   strictTransport: TLS_ENABLED || ADMIN_TRUST_PROXY
 });
@@ -189,20 +189,21 @@ const requestHandler = async (req, res) => {
       return;
     }
 
-    if (requestUrl.pathname === "/admin") {
+    const staticPath = resolveStaticPath(requestUrl);
+    if (staticPath.publicPath === "/admin") {
       redirect(res, "/admin.html");
       return;
     }
 
-    if (requestUrl.pathname === "/login.html" && !ADMIN_AUTH_ENABLED) {
+    if (staticPath.publicPath === "/login.html" && !ADMIN_AUTH_ENABLED) {
       redirect(res, "/admin.html");
       return;
     }
 
-    if (PROTECTED_ADMIN_ASSETS.has(requestUrl.pathname) && ADMIN_AUTH_ENABLED) {
+    if (PROTECTED_ADMIN_ASSETS.has(staticPath.publicPath) && ADMIN_AUTH_ENABLED) {
       const session = adminSession(req);
       if (!session) {
-        if (requestUrl.pathname === "/admin.html") {
+        if (staticPath.publicPath === "/admin.html") {
           redirect(res, "/login.html?next=%2Fadmin.html");
         } else {
           sendText(res, 401, "Authentication required.", { "cache-control": "no-store" });
@@ -211,7 +212,7 @@ const requestHandler = async (req, res) => {
       }
     }
 
-    await serveStatic(requestUrl, res, req.headers);
+    await serveStatic(staticPath, res, req.headers);
   } catch (error) {
     const statusCode = Number(error.statusCode);
     if (statusCode >= 400 && statusCode < 500) {

@@ -68,24 +68,32 @@ function createHttpResponder(options) {
     res.end();
   }
 
-  async function serveStatic(requestUrl, res, requestHeaders = {}) {
+  function resolveStaticPath(requestUrl) {
     const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
     let decodedPath;
     try {
       decodedPath = decodeURIComponent(requestPath);
     } catch {
-      sendText(res, 400, "Bad request.");
-      return;
+      const error = new Error("Bad request.");
+      error.statusCode = 400;
+      throw error;
     }
 
     const filePath = path.normalize(path.join(publicDir, decodedPath));
     const relativePath = path.relative(publicDir, filePath);
-    // If public/ ever becomes runtime-writable, replace this lexical containment
-    // check with realpath-based containment so symlink targets cannot escape it.
     if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-      sendText(res, 403, "Forbidden.");
-      return;
+      const error = new Error("Forbidden.");
+      error.statusCode = 403;
+      throw error;
     }
+    return {
+      filePath,
+      publicPath: `/${relativePath.split(path.sep).join("/")}`
+    };
+  }
+
+  async function serveStatic(resolvedPath, res, requestHeaders = {}) {
+    const { filePath, publicPath } = resolvedPath;
 
     let stats;
     try {
@@ -100,7 +108,7 @@ function createHttpResponder(options) {
     }
 
     const contentType = MIME_TYPES.get(path.extname(filePath)) || "application/octet-stream";
-    const sensitiveAsset = ["/admin.html", "/admin.js", "/login.html", "/login.js"].includes(decodedPath);
+    const sensitiveAsset = ["/admin.html", "/admin.js", "/login.html", "/login.js"].includes(publicPath);
     const lastModified = stats.mtime.toUTCString();
     const responseHeaders = {
       "cache-control": sensitiveAsset ? "no-store" : "no-cache, must-revalidate",
@@ -120,7 +128,7 @@ function createHttpResponder(options) {
     fs.createReadStream(filePath).pipe(res);
   }
 
-  return { redirect, redirectPermanent, securityHeaders, sendJson, sendText, serveStatic };
+  return { redirect, redirectPermanent, resolveStaticPath, securityHeaders, sendJson, sendText, serveStatic };
 }
 
 module.exports = { createHttpResponder };

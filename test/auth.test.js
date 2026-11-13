@@ -267,6 +267,17 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   const unauthorizedPage = await request(port, { path: "/admin.html" });
   assert.equal(unauthorizedPage.statusCode, 302);
   assert.equal(unauthorizedPage.headers.location, "/login.html?next=%2Fadmin.html");
+  for (const alias of ["/%61dmin.html", "/admin%2Ehtml", "/%2Fadmin.html"]) {
+    const response = await request(port, { path: alias });
+    assert.equal(response.statusCode, 302, alias);
+    assert.equal(response.headers.location, "/login.html?next=%2Fadmin.html", alias);
+  }
+  for (const alias of ["/%61dmin.js", "/admin%2Ejs"]) {
+    const response = await request(port, { path: alias });
+    assert.equal(response.statusCode, 401, alias);
+  }
+  const malformedPath = await request(port, { path: "/%ZZadmin.html" });
+  assert.equal(malformedPath.statusCode, 400);
 
   const insecureLogin = await request(port, {
     method: "POST",
