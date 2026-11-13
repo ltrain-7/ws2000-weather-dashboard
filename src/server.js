@@ -679,9 +679,16 @@ function upsertData(data, source, shouldBroadcast) {
 
   const sanitized = sanitizeData(data, macAddress);
   sanitized.source = source;
+  persistReading(sanitized, source);
+  const current = latestByMac.get(macAddress);
+  const timestamp = (reading) => Number(reading?.dateutc) || Date.parse(reading?.date || "");
+  if (current && timestamp(sanitized) < timestamp(current)) {
+    const device = devicesByMac.get(macAddress);
+    if (device) device.lastData = current;
+    return;
+  }
   latestByMac.set(macAddress, sanitized);
   pushLiveHistory(macAddress, sanitized);
-  persistReading(sanitized, source);
 
   const device = devicesByMac.get(macAddress);
   if (device) {
@@ -794,24 +801,32 @@ function analyticsResponse(requestUrl) {
   const macAddress = clean(requestUrl.searchParams.get("mac")) || DEFAULT_DEVICE_MAC || firstKnownMac();
   if (!macAddress) return { macAddress: null, current: null, previous: null, rainfall: {} };
   const days = clamp(Number(requestUrl.searchParams.get("days") || 30), 1, 3650);
-  const end = Date.now();
-  const start = end - days * 86400000;
-  const previousStart = start - days * 86400000;
-  const currentDate = new Date(end);
+  const requestedStart = historyDateParameter(requestUrl, "startDate");
+  const requestedEnd = historyDateParameter(requestUrl, "endDate");
+  const end = requestedEnd ? Date.parse(requestedEnd) : Date.now();
+  const start = requestedStart ? Date.parse(requestedStart) : end - days * 86400000;
+  if (start >= end) {
+    const error = new Error("startDate must be earlier than endDate.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const previousStart = start - (end - start);
+  const now = Date.now();
+  const currentDate = new Date(now);
   const startOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
   const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getTime();
   const startOfYear = new Date(currentDate.getFullYear(), 0, 1).getTime();
   const rainfall = {
-    day: storage.getAnalytics(macAddress, startOfDay, end),
-    week: storage.getAnalytics(macAddress, end - 7 * 86400000, end),
-    month: storage.getAnalytics(macAddress, startOfMonth, end),
-    year: storage.getAnalytics(macAddress, startOfYear, end)
+    day: storage.getAnalytics(macAddress, startOfDay, now),
+    week: storage.getAnalytics(macAddress, now - 7 * 86400000, now),
+    month: storage.getAnalytics(macAddress, startOfMonth, now),
+    year: storage.getAnalytics(macAddress, startOfYear, now)
   };
   return {
     macAddress,
     days,
     timezone: STATION_TIMEZONE,
-    generatedAt: new Date(end).toISOString(),
+    generatedAt: new Date(now).toISOString(),
     coverage: storage.getReadingStats(macAddress),
     current: storage.getAnalytics(macAddress, start, end),
     previous: storage.getAnalytics(macAddress, previousStart, start),

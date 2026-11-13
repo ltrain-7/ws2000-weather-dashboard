@@ -81,6 +81,15 @@ test("public history cannot invoke Ambient, while maintenance backfill still imp
   const imported = await request(port, "/api/history?limit=96&source=local");
   assert.equal(imported.body.count, 2);
   assert.equal(historyCalls, 1);
+  const start = new Date(now - 2 * 86400000 - 1).toISOString();
+  const end = new Date(now - 86400000).toISOString();
+  const analytics = await request(port, `/api/analytics?mac=fixture&startDate=${start}&endDate=${end}`);
+  assert.equal(analytics.status, 200);
+  assert.equal(analytics.body.current.maximumTempf, 60);
+  assert.equal(analytics.body.current.readingCount, 1);
+  assert.equal(analytics.body.current.startDate, start);
+  assert.equal(analytics.body.current.endDate, end);
+  assert.equal((await request(port, `/api/analytics?startDate=${end}&endDate=${start}`)).status, 400);
 });
 
 function listen(server) {

@@ -143,3 +143,31 @@ test("daily rainfall follows the configured station timezone", (context) => {
     { day: "2026-08-24", rainIn: 0.2 }
   ]);
 });
+
+
+test("rolling rainfall subtracts the opening counter and retains later calendar days", (context) => {
+  const store = createWeatherStore({ dbPath: ":memory:", retentionDays: 0 });
+  context.after(() => store.close());
+  const day = new Date(2026, 9, 20).getTime();
+  for (const [hour, rain] of [[1, 1], [13, 1], [23, 1], [25, 0.2], [35, 0.3]]) {
+    store.saveReading({ macAddress: "rain", dateutc: day + hour * 3600000, dailyrainin: rain }, "test");
+  }
+  assert.ok(Math.abs(store.getAnalytics("rain", day + 12 * 3600000, day + 36 * 3600000).rainfallTotalIn - 0.3) < 1e-9);
+  assert.ok(Math.abs(store.getAnalytics("rain", day, day + 48 * 3600000).rainfallTotalIn - 1.3) < 1e-9);
+});
+
+test("full-resolution daily analytics retain extremes omitted from chart samples", (context) => {
+  const store = createWeatherStore({ dbPath: ":memory:", retentionDays: 0 });
+  context.after(() => store.close());
+  const start = Date.parse("2026-10-20T00:00:00Z");
+  for (let index = 0; index < 1440; index++) {
+    store.saveReading({ macAddress: "daily", dateutc: start + index * 60000,
+      tempf: index === 1 ? 100 : 70, windgustmph: index === 1 ? 50 : 2 }, "test");
+  }
+  const sampled = store.getHistory("daily", { startDate: start, endDate: start + 86400000 - 1, maxPoints: 480 });
+  assert.equal(Math.max(...sampled.map(row => row.tempf)), 70);
+  const analytics = store.getAnalytics("daily", start, start + 86400000);
+  assert.equal(analytics.maximumTempf, 100);
+  assert.equal(analytics.maximumGustMph, 50);
+  assert.equal(analytics.maximumTempAt, new Date(start + 60000).toISOString());
+});

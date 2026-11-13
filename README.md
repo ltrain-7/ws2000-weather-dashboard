@@ -332,7 +332,7 @@ Browsers require HTTPS for service workers except on `localhost`. A dashboard op
 - The health banner warns when the latest packet is older than `STATION_STALE_MINUTES`, becomes offline after four times that interval, or reports a low outdoor battery.
 - Enable **Compare previous period** to overlay the preceding day or rolling range as a dashed line and show summary differences.
 - Temperature period details include the timestamp at which the high and low were observed.
-- Rainfall totals use the maximum station daily counter for each local calendar day, preventing frequent observations from being double-counted. The dashboard shows today, the last seven days, the current month, the current year, and the wettest day in the analysis period.
+- Rainfall totals use the maximum station daily counter for each local calendar day, preventing frequent observations from being double-counted. Rolling windows subtract the last available counter before the start when it belongs to the same local calendar day. If that baseline is missing, totals reflect the available daily counters. The dashboard shows today, the last seven days, the current month, the current year, and the wettest day in the analysis period.
 - The administration page can start a 1–365 day Ambient history backfill. Progress remains visible while the server process is running.
 - Raw station packet fields are kept off the main dashboard and remain available under **Administration → Advanced station fields**.
 
@@ -378,7 +378,10 @@ docker compose logs --tail=100 ws2000-dashboard
 - `GET /api/latest`
 - `GET /api/forecast`
 - `GET /api/history`
+- `GET /api/analytics`
 - `GET /api/storage` (administrator session required when authentication is enabled)
 - `GET /api/events`
 
 Forecast data is provided by [Open-Meteo](https://open-meteo.com/). Review its attribution and usage terms before using the dashboard commercially or at high request volume. The built-in server cache minimizes external requests and can serve the last successful forecast during a temporary provider outage.
+
+The analytics endpoint accepts optional `startDate` (inclusive) and `endDate` (exclusive) timestamps. Selected-day insights use these bounds to aggregate all stored observations, independently of chart sampling.

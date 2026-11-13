@@ -8,12 +8,8 @@
       return { summaryHtml: empty, comparisonHtml: empty, rainfallHtml: empty, comparisonTitle: "Current period" };
     }
 
-    const current = options.historyDate
-      ? summarizeHistory(options.history, options.normalizeHistory)
-      : analytics.current;
-    const previous = options.historyDate
-      ? summarizeHistory(options.comparisonHistory, options.normalizeHistory)
-      : analytics.previous;
+    const current = analytics.current;
+    const previous = analytics.previous;
     const comparisonTitle = options.historyDate
       ? `${formatters.formatSelectedDate(options.historyDate)} vs previous day`
       : options.historyRangeDays

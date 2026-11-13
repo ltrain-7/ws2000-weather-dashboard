@@ -271,6 +271,12 @@ class WeatherStore {
         ORDER BY tempf DESC, dateutc ASC
         LIMIT 1
       `),
+      rainBaseline: this.db.prepare(`
+        SELECT date(dateutc / 1000, 'unixepoch', 'localtime') AS day, dailyrainin
+        FROM weather_readings
+        WHERE mac_address = ? AND dateutc < ? AND dailyrainin IS NOT NULL
+        ORDER BY dateutc DESC LIMIT 1
+      `),
       dailyRain: this.db.prepare(`
         SELECT
           date(dateutc / 1000, 'unixepoch', 'localtime') AS day,
@@ -404,6 +410,12 @@ class WeatherStore {
     const dailyRain = this.statements.dailyRain
       .all(macAddress, start, end)
       .map((row) => ({ day: row.day, rainIn: numberOrZero(row.rain_in) }));
+    // The first day's counter may include rain before a rolling window began.
+    // Never subtract a previous calendar day's counter: it resets at midnight.
+    const baseline = this.statements.rainBaseline.get(macAddress, start);
+    if (baseline && dailyRain[0]?.day === baseline.day) {
+      dailyRain[0].rainIn = Math.max(0, dailyRain[0].rainIn - baseline.dailyrainin);
+    }
     return {
       startDate: new Date(start).toISOString(),
       endDate: new Date(end).toISOString(),

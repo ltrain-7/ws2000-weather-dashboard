@@ -1,4 +1,4 @@
-const CACHE_NAME = "ws2000-v1.11.0";
+const CACHE_NAME = "ws2000-v1.11.0-weather-fixes";
 const STATIC_ASSETS = ["/", "/index.html", "/styles.css?v=1.11.0", "/history-time.js?v=1.11.0", "/insights.js?v=1.11.0", "/forecast.js?v=1.11.0", "/layout.js?v=1.11.0", "/app.js?v=1.11.0", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

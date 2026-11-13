@@ -67,3 +67,19 @@ test("insights preserve missing sensor values instead of converting them to zero
   assert.match(view.summaryHtml, /Average temp<\/span><strong>--<\/strong>/);
   assert.doesNotMatch(view.summaryHtml, /<strong>0(?:\.0)?°F<\/strong>/);
 });
+
+
+test("selected days render server aggregates instead of sampled chart extremes", () => {
+  const window = {};
+  vm.runInNewContext(source, { window });
+  const view = window.WeatherInsights.render({
+    historyDate: "2026-10-20", history: [{ tempf: 70 }], comparisonHistory: [],
+    normalizeHistory: rows => rows,
+    analytics: { current: { maximumTempf: 100, maximumGustMph: 50 }, previous: {}, rainfall: {} }
+  }, {
+    formatSelectedDate: value => value, formatDateOnly: value => value,
+    formatTime: value => value, formatUnitValue: (value, unit) => `${value}${unit}`
+  });
+  assert.match(view.summaryHtml, /High temp<\/span><strong>100°F/);
+  assert.match(view.summaryHtml, /Peak gust<\/span><strong>50mph/);
+});

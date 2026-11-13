@@ -577,8 +577,12 @@ async function loadHistory() {
       } catch {}
     }
     try {
+      // Analytics uses an exclusive end; chart ranges include their last millisecond.
+      const analyticsDates = state.historyDate && dateRange
+        ? `&startDate=${encodeURIComponent(dateRange.start)}&endDate=${encodeURIComponent(new Date(Date.parse(dateRange.end) + 1).toISOString())}`
+        : "";
       state.analytics = await fetchJson(
-        `/api/analytics?mac=${encodeURIComponent(state.selectedMac)}&days=${state.historyRangeDays || 1}`
+        `/api/analytics?mac=${encodeURIComponent(state.selectedMac)}&days=${state.historyRangeDays || 1}${analyticsDates}`
       );
     } catch {
       state.analytics = null;
