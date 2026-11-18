@@ -46,7 +46,7 @@ Use Docker Desktop with its WSL 2 backend and Linux containers. See the [Windows
    docker compose up -d
    ```
 
-6. Open `http://RASPBERRY-PI-IP:3000`.
+6. Open `http://127.0.0.1:3000` on the Docker host. For access from another device, configure HTTPS and administrator authentication first, then explicitly set `DASHBOARD_PORT=0.0.0.0:3000` (or a specific LAN address and port) in `.env`.
 
 The local forecast is enabled automatically and normally uses the station location supplied privately by Ambient Weather. The server sends those coordinates to Open-Meteo to request the forecast, but never exposes them to the browser. If your station metadata has no location, set `FORECAST_LATITUDE` and `FORECAST_LONGITUDE` in `.env`.
 
@@ -224,7 +224,7 @@ docker compose up -d
 | `AMBIENT_DEVICE_MAC` | Optional station MAC to select by default |
 | `TZ` | Container timezone, such as `America/New_York` |
 | `STATION_TIMEZONE` | IANA timezone used for station calendar days, rainfall, and date-picker ranges; defaults to `TZ` |
-| `DASHBOARD_PORT` | Host port; defaults to `3000` |
+| `DASHBOARD_PORT` | Docker published address and port; defaults to `127.0.0.1:3000` for host-only access |
 | `WS2000_IMAGE` | Published container image; defaults to the `stable` GHCR release |
 | `AMBIENT_POLL_INTERVAL_MS` | REST fallback interval; minimum 30 seconds |
 | `AMBIENT_HISTORY_LIMIT` | Recent readings requested; maximum 288 |
@@ -313,10 +313,10 @@ The database survives updates and rebuilds because it lives in the host `data` d
 
 ## Security
 
-- Keep `.env` private; never email or commit it.
+- Keep `.env` private (`chmod 600 .env` on Linux); never email or commit it. Re-run `scripts/setup.sh` to tighten permissions on an existing `.env`.
 - The browser never receives the Ambient keys.
 - Built-in authentication can protect the administration page and maintenance APIs; it is disabled by default for upgrade compatibility. See [Administrator authentication](docs/AUTHENTICATION.md).
-- Do not expose port 3000 directly to the public internet. Bind it to loopback behind DSM/Caddy or use a trusted LAN firewall rule.
+- New installs publish port 3000 on loopback only. Existing `.env` files with `DASHBOARD_PORT=3000` still publish on all interfaces; change the value to `127.0.0.1:3000` unless wider access is intentional. Do not expose port 3000 directly to the public internet.
 - HTTPS protects credentials and session cookies in transit. Authentication does not make the public weather dashboard private; use a VPN or proxy-wide authentication if the whole site must be restricted.
 - Docker logs are rotated to protect small SD cards from unbounded log growth.
 - CI smoke-tests the published `amd64`, `arm64`, and `arm/v7` images under emulation. This improves Raspberry Pi confidence but does not replace validation on every physical Pi model and OS image.

@@ -1068,7 +1068,9 @@ function isSameOriginRequest(req) {
   try {
     const parsedOrigin = new URL(origin);
     if (PUBLIC_ORIGIN) return parsedOrigin.origin === PUBLIC_ORIGIN;
-    return parsedOrigin.host === clean(req.headers.host);
+    const protocol = isRequestSecure(req) ? "https" : "http";
+    const requestOrigin = new URL(`${protocol}://${clean(req.headers.host)}`).origin;
+    return parsedOrigin.origin === requestOrigin;
   } catch {
     return false;
   }

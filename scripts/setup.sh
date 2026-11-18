@@ -16,6 +16,7 @@ else
   cp "$profile_file" .env
   echo "Created .env from $profile_file."
 fi
+chmod 600 .env
 
 mkdir -p data backups certs secrets
 chmod 775 data backups

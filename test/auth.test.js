@@ -360,6 +360,52 @@ test("server protects administration routes, requires HTTPS and CSRF, and clears
   assert.equal(afterLogout.statusCode, 401);
 });
 
+test("Origin fallback rejects a different scheme without Fetch Metadata", async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ws2000-origin-server-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const port = await availablePort();
+  const child = spawn(process.execPath, ["--no-warnings", "src/server.js"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      HOST: "127.0.0.1",
+      PORT: String(port),
+      AMBIENT_APPLICATION_KEY: "",
+      AMBIENT_API_KEY: "",
+      AMBIENT_API_KEYS: "",
+      SQLITE_DB_PATH: path.join(directory, "weather.db"),
+      BACKUP_INTERVAL_HOURS: "0",
+      ADMIN_AUTH_ENABLED: "false",
+      ADMIN_TRUST_PROXY: "false",
+      PUBLIC_ORIGIN: "",
+      HTTPS_REDIRECT_ENABLED: "false",
+      TLS_ENABLED: "false"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let logs = "";
+  child.stdout.on("data", (chunk) => { logs += chunk; });
+  child.stderr.on("data", (chunk) => { logs += chunk; });
+  context.after(() => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
+  await waitForServer(port, child, () => logs);
+
+  const crossScheme = await request(port, {
+    method: "POST",
+    path: "/api/refresh",
+    headers: { host: "weather.test", origin: "https://weather.test" }
+  });
+  assert.equal(crossScheme.statusCode, 403);
+
+  const sameOrigin = await request(port, {
+    method: "POST",
+    path: "/api/refresh",
+    headers: { host: "weather.test", origin: "http://weather.test" }
+  });
+  assert.equal(sameOrigin.statusCode, 200);
+});
+
 test("trusted proxy mode refuses a non-loopback application exposure", async () => {
   const child = spawn(process.execPath, ["--no-warnings", "src/server.js"], {
     cwd: root,

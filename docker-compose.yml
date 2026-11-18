@@ -11,7 +11,7 @@ services:
       SQLITE_DB_PATH: /app/data/weather.db
       BACKUP_DIR: /app/backups
     ports:
-      - "${DASHBOARD_PORT:-3000}:3000"
+      - "${DASHBOARD_PORT:-127.0.0.1:3000}:3000"
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups
